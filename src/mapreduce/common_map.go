@@ -2,6 +2,10 @@ package mapreduce
 
 import (
 	"hash/fnv"
+	"io/ioutil"
+	"os"
+	"encoding/json"
+	"log"
 )
 
 // doMap manages one map task: it reads one of the input files
@@ -17,6 +21,54 @@ func doMap(
 	//
 	// You will need to write this function.
 	//
+
+	log.Println(inFile)
+
+
+	// 读取 input文件所有 字节
+	buf , err := ioutil.ReadFile(inFile)
+	if err != nil {
+		log.Fatal(err)
+		// 文件打开失败
+	}
+
+	fp := make([]*os.File, nReduce) // 生成 nReduce 个 文件指针
+	enc := make([]*json.Encoder, nReduce) // 对应的Encoder
+
+	// 对 文件指针 Encoder赋值
+	for r := 0; r < nReduce; r++ {
+		fileName := reduceName(jobName, mapTaskNumber, r) // 第r个 中间文件名
+		log.Println(fileName)
+
+		fp[r], err = os.Create(fileName) // 创建第r个文件
+		defer  fp[r].Close()
+
+		if err != nil {
+			log.Fatal(err)
+		}
+		enc[r] = json.NewEncoder(fp[r])
+	}
+
+
+
+	kvs := mapF(inFile, string(buf)) //获得 kvs
+
+	log.Println(fp, enc)
+	for _, kv := range kvs {
+		k := kv.Key
+		//v := kv.Value
+
+		r := ihash(k) % nReduce // 选择第r个中间文件
+		err = enc[r].Encode(&kv) // 写入
+
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+
+
+
 	// The intermediate output of a map task is stored as multiple
 	// files, one per destination reduce task. The file name includes
 	// both the map task number and the reduce task number. Use the
