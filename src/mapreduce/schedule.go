@@ -2,7 +2,7 @@ package mapreduce
 
 import (
 	"fmt"
-	"sync"
+	//"sync"
 	"log"
 )
 
@@ -38,13 +38,16 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 
 
-	var wg sync.WaitGroup
+	//var wg sync.WaitGroup
+
+	flag := make(chan bool, ntasks) //
+
 	for id := 0; id < ntasks; id++ {
 
 		log.Println("----------", id)
-		wg.Add(1) // 每次开启新的goroutine时，增加1
-		go func(id int) {
-			defer wg.Done() // goroutine结束时，减一
+		//wg.Add(1) // 每次开启新的goroutine时，增加1
+		go func(id int, flag chan bool) {
+			//defer wg.Done() // goroutine结束时，减一
 
 			// 对于同一task 会反复去分配worker 处理 worker fail Part IV
 			for {
@@ -76,10 +79,15 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 					break
 				}
 			}
+			flag <- true
 
-		}(id)
+		}(id, flag)
 	}
 
-	wg.Wait() // 等待所有goroutine 结束
+	//wg.Wait() // 等待所有goroutine 结束
+	for i := 0; i < ntasks; i++ {
+		<- flag
+	}
+
 	fmt.Printf("Schedule: %v phase done\n", phase)
 }
