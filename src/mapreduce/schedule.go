@@ -39,8 +39,7 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 
 
 	//var wg sync.WaitGroup
-
-	flag := make(chan bool, ntasks) //
+	flag := make(chan bool, ntasks) // n个buffer
 
 	for id := 0; id < ntasks; id++ {
 
@@ -49,37 +48,40 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 		go func(id int, flag chan bool) {
 			//defer wg.Done() // goroutine结束时，减一
 
+
+			addr := <- registerChan // 取出worker addr 要重新放回
+			//log.Println("worker addr: ", addr, "id: ", id, "phase", phase)
+			fileName := ""
+			if phase == mapPhase {
+				fileName = mapFiles[id]
+			}
+
+			tmp := DoTaskArgs{JobName:jobName, File:fileName, Phase:phase, TaskNumber: id, NumOtherPhase:n_other}
+
 			// 对于同一task 会反复去分配worker 处理 worker fail Part IV
 			for {
-				addr := <- registerChan // 取出worker addr 要重新放回
-				//log.Println("worker addr: ", addr, "id: ", id, "phase", phase)
-				fileName := ""
-				if phase == mapPhase {
-					fileName = mapFiles[id]
-				}
 
-				tmp := DoTaskArgs{JobName:jobName, File:fileName, Phase:phase, TaskNumber: id, NumOtherPhase:n_other}
 				ok := call(addr, "Worker.DoTask", tmp, nil)
 
-				//registerChan <- addr
-
 				if !ok {
-					// worker没有响应，继续分配
+					// worker没有响应，work addr不再放入 Channel，将task 分配给其他 worker
+
 					log.Println("DoTask error", addr)
 				} else {
 					// worker响应，break，处理下一个task
 
 
 					// 需要goroutine，否则死锁，part III 就需要
-					go func() { // 重新将addr加入Chan
-						registerChan <- addr
-					}()
+					//go func() { // 重新将addr加入Chan
 
+						flag <- true
+						registerChan <- addr
+
+					//}()
 
 					break
 				}
 			}
-			flag <- true
 
 		}(id, flag)
 	}
@@ -91,3 +93,10 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 
 	fmt.Printf("Schedule: %v phase done\n", phase)
 }
+
+// 1，flag 与 sync.WaitGroup 等价
+// 2, registerChan 没有缓存，在其他地方有存入操作
+// 3, debug：没有flag，会出现 worker分配多个任务
+
+// 4, debug：有flag，顺序影响了结果
+// 5, debug: registerChan的 存入 使用 goroutine 不报错?
