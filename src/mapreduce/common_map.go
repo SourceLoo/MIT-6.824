@@ -22,7 +22,7 @@ func doMap(
 	// You will need to write this function.
 	//
 
-	log.Println(inFile)
+	//log.Println(inFile)
 
 
 	// 读取 input文件所有 字节
@@ -38,7 +38,7 @@ func doMap(
 	// 对 文件指针 Encoder赋值
 	for r := 0; r < nReduce; r++ {
 		fileName := reduceName(jobName, mapTaskNumber, r) // 第r个 中间文件名
-		log.Println(fileName)
+		//log.Println(fileName)
 
 		fp[r], err = os.Create(fileName) // 创建第r个文件
 		defer  fp[r].Close()
@@ -53,7 +53,7 @@ func doMap(
 
 	kvs := mapF(inFile, string(buf)) //获得 kvs
 
-	log.Println(fp, enc)
+	//log.Println(fp, enc)
 	for _, kv := range kvs {
 		k := kv.Key
 		//v := kv.Value

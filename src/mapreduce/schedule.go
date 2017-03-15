@@ -46,23 +46,25 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 		go func(id int) {
 			defer wg.Done() // goroutine结束时，减一
 
-			// 对于同一task 会反复去分配worker 处理 worker fail
-			//for {
+			// 对于同一task 会反复去分配worker 处理 worker fail Part IV
+			for {
 				addr := <- registerChan // 取出worker addr 要重新放回
-				log.Println("worker addr: ", addr, "id: ", id, "phase", phase)
+				//log.Println("worker addr: ", addr, "id: ", id, "phase", phase)
 				fileName := ""
 				if phase == mapPhase {
 					fileName = mapFiles[id]
 				}
 
 				tmp := DoTaskArgs{JobName:jobName, File:fileName, Phase:phase, TaskNumber: id, NumOtherPhase:n_other}
-				call(addr, "Worker.DoTask", tmp, nil)
+				ok := call(addr, "Worker.DoTask", tmp, nil)
 
-				//if !ok {
-				//	// worker没有响应，继续分配
-				//	log.Println("DoTask error", addr)
-				//} else {
-				//	// worker响应，break，处理下一个task
+				//registerChan <- addr
+
+				if !ok {
+					// worker没有响应，继续分配
+					log.Println("DoTask error", addr)
+				} else {
+					// worker响应，break，处理下一个task
 
 
 					// 需要goroutine，否则死锁，part III 就需要
@@ -71,9 +73,9 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 					}()
 
 
-					//break
-//				}
-			//}
+					break
+				}
+			}
 
 		}(id)
 	}
