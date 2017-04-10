@@ -32,12 +32,16 @@ func doMap(
 		// 文件打开失败
 	}
 
-	fp := make([]*os.File, nReduce) // 生成 nReduce 个 文件指针
-	enc := make([]*json.Encoder, nReduce) // 对应的Encoder
+	kvs := mapF(inFile, string(buf)) //获得 kvs
+	// kv list 结果不能之间写入nReduce个中间文件，需要进过 序列化
 
-	// 对 文件指针 Encoder赋值
+
+	fp := make([]*os.File, nReduce) // 生成 nReduce 个 文件指针
+	enc := make([]*json.Encoder, nReduce) // 生成 nReduce个 对应的Encoder
+
+	// 使用文件指针 对Encoder 进行赋值
 	for r := 0; r < nReduce; r++ {
-		fileName := reduceName(jobName, mapTaskNumber, r) // 第r个 中间文件名
+		fileName := reduceName(jobName, mapTaskNumber, r) // 获取第r个 中间文件名
 		//log.Println(fileName)
 
 		fp[r], err = os.Create(fileName) // 创建第r个文件
@@ -49,16 +53,12 @@ func doMap(
 		enc[r] = json.NewEncoder(fp[r])
 	}
 
-
-
-	kvs := mapF(inFile, string(buf)) //获得 kvs
-
 	//log.Println(fp, enc)
 	for _, kv := range kvs {
 		k := kv.Key
 		//v := kv.Value
 
-		r := ihash(k) % nReduce // 选择第r个中间文件
+		r := ihash(k) % nReduce // 使用k，进行hash，获得r，即选择第r个中间文件存入当前kv
 		err = enc[r].Encode(&kv) // 写入
 
 		if err != nil {
