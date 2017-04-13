@@ -74,9 +74,9 @@ type Raft struct {
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
 
-	// Your data here (2A, 2B, 2C).
-	// Look at the paper's Figure 2 for a description of what
-	// state a Raft server must maintain.
+				      // Your data here (2A, 2B, 2C).
+				      // Look at the paper's Figure 2 for a description of what
+				      // state a Raft server must maintain.
 
 	currentTerm int
 	votedFor int // 给谁投了票，他必然认定谁是leader
@@ -93,12 +93,11 @@ type Raft struct {
 	state string // 状态
 	voteCnt int // 获得选票数
 
-	receiveEntriesCh chan bool // 通知 收到entries
-	grantedVoteCh chan bool // 通知 投出选票
+	receiveEntryCh chan bool // 通知 收到Leader的Entry
+	grantVoteCh chan bool // 通知 投出选票
 
 	findLargerTermCh chan bool // 通信时，rf作为接受者，对方term大，变为Follower
-	getMajorityVotes chan bool // 通信时，rf 作为接受者 Candidate，变为Leader
-
+	receiveMajorityVotesCh chan bool // 通信时，rf 作为接受者 Candidate，变为Leader
 
 }
 
@@ -217,7 +216,37 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Success = false
 		return
 	}
-	
+
+	switch rf.state {
+	case Follower:
+		if args.Term > rf.currentTerm {
+			rf.findLargerTerm(args.Term)
+
+		} else {
+			rf.receiveEntry()
+		}
+
+	case Candidate:
+		if args.Term > rf.currentTerm {
+			rf.findLargerTerm(args.Term)
+
+		} else {
+			rf.receiveEntry()
+		}
+
+	case Leader:
+		if args.Term > rf.currentTerm {
+			rf.findLargerTerm(args.Term)
+
+		} else { // 同一个Term 不可能出现两个Leader
+			log.Fatalf("more than two leaders with the same term")
+			//rf.receiveEntry()
+		}
+
+	}
+	reply.Success = true
+
+
 	// 以下情况是leader 的term 不小于本地，
 
 
@@ -226,38 +255,23 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf作为接受者，必须得通过channel来通知  这次通信结束后，改变状态。同时，得在此函数中，更新接受者的term
 
-			args作为发送者，在sendXXX时，获得reply值，在那个地方，改变通信结束状态 与 更新发送者term
+		args作为发送者，在sendXXX时，获得reply值，在那个地方，改变通信结束状态 与 更新发送者term
 
 	A send to rf, rf receive MSG, rf reply;
 	*/
 
-	// 对方大，变F
-	if args.Term > rf.currentTerm {
-		rf.findLargerTerm(args.Term)
-
-	} else if  args.Term == rf.currentTerm && rf.state != Leader{ // 心跳，FC边F
-		rf.state = Follower
-		rf.votedFor = args.LeaderId // 认为对方是leader
-
-		log.Printf("term %d, id %d, %s(Follower) end work, received Entries\n", rf.currentTerm, rf.me, rf.state)
-
-		rf.mu.Unlock()
-		rf.receiveEntriesCh <- true
-		rf.mu.Lock()
-	}
-	reply.Success = true
 
 	/*
 
 	// 若本地log与leader 不一致 拒绝
 	if len(rf.log) - 1 < args.PrevLogIndex{
-		reply.Success = false
-		return
+	    reply.Success = false
+	    return
 
 	} else if rf.log[args.PrevLogIndex].Term != args.Term{
-		reply.Success = false
-		rf.log = rf.log[0:args.PrevLogIndex] // 删除args.PrevLogIndex与其之后所有entries
-		return
+	    reply.Success = false
+	    rf.log = rf.log[0:args.PrevLogIndex] // 删除args.PrevLogIndex与其之后所有entries
+	    return
 	}
 
 	// 若本地log与leader 一致，更新本地log
@@ -265,7 +279,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// 更新 本地commitIndex
 	if args.LeaderCommit > rf.commitIndex {
-		rf.commitIndex = math.MinInt32(args.LeaderCommit, len(rf.log) - 1)
+	    rf.commitIndex = math.MinInt32(args.LeaderCommit, len(rf.log) - 1)
 	}*/
 
 }
@@ -300,7 +314,59 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
-	// 对方大，变F
+	switch rf.state {
+	case Follower:
+		if args.Term > rf.currentTerm {
+
+			// 对方大，变为Follower 与此同时 也投票，覆盖掉rf.grantVoteCh <- true
+			reply.VoteGranted = true
+			rf.votedFor = args.CandidateId
+
+			rf.findLargerTerm(args.Term)
+
+		} else {
+			if rf.votedFor == -1 || rf.votedFor == args.CandidateId{
+				reply.VoteGranted = true
+
+				rf.grantVote(args.CandidateId)
+			} else {
+				reply.VoteGranted = false
+			}
+		}
+
+	case Candidate:
+		if args.Term > rf.currentTerm {
+
+			// 对方大，变为Follower 与此同时 也投票，覆盖掉rf.grantVoteCh <- true
+			reply.VoteGranted = true
+			rf.votedFor = args.CandidateId
+
+			rf.findLargerTerm(args.Term)
+
+		} else {
+
+			// 两位Candidate Term相同，必然不投票
+			reply.VoteGranted = false
+		}
+
+	case Leader:
+		if args.Term > rf.currentTerm {
+
+			// 对方大，变为Follower 与此同时 也投票，覆盖掉rf.grantVoteCh <- true
+			reply.VoteGranted = true
+			rf.votedFor = args.CandidateId
+
+			rf.findLargerTerm(args.Term)
+
+		} else {
+
+			// Leader 不会把票给Term相同 的 Candidate
+			reply.VoteGranted = false
+		}
+	}
+
+
+	/*// 对方大，变F
 	if args.Term > rf.currentTerm {
 		reply.VoteGranted = true
 
@@ -325,23 +391,23 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		log.Printf("term %d, id %d, %s(Follower) end work, granted Vote\n", rf.currentTerm, rf.me, rf.state)
 
 		rf.mu.Unlock()
-		rf.grantedVoteCh <- true // 决定投票 通知rf 变为 follower
+		rf.grantVoteCh <- true // 决定投票 通知rf 变为 follower
 		rf.mu.Lock()
 
 	} else {
 		reply.VoteGranted = false
-	}
+	}*/
 
 	// 本地没有投票 或 已经投过次candidate了  且 此candidate的log至少和本地一样新
 	/*
 	lastIndex := len(rf.log) - 1
 	if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) && ((args.LastLogTerm > rf.log[lastIndex].Term ) || (args.LastLogTerm == rf.log[lastIndex].Term && args.LastLogIndex >= lastIndex)) {
 
-		// 决定投票
-		reply.VoteGranted = true
-		rf.votedFor = args.CandidateId
+	    // 决定投票
+	    reply.VoteGranted = true
+	    rf.votedFor = args.CandidateId
 	} else {
-		reply.VoteGranted = false
+	    reply.VoteGranted = false
 	}*/
 }
 
@@ -350,12 +416,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 func (rf *Raft)  sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 
-	if !ok {
-		return ok
-	}
-
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	// 如果 不再是Leader 这里的回应没有意义了
+	if !ok || rf.state != Leader {
+		return ok
+	}
 
 	// 收到response，更新 term 适用L
 	if reply.Term > rf.currentTerm { // 对方 term大
@@ -403,8 +470,8 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	// 如果状态已经变化了 这里的选票没有意义了
-	if !ok || rf.state != Candidate{
+	// 如果 不再是Candidate 这里的选票没有意义了
+	if !ok || rf.state != Candidate {
 		return ok
 	}
 
@@ -413,19 +480,15 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	if reply.Term > rf.currentTerm {
 		rf.findLargerTerm(reply.Term)
 
-	}else if reply.VoteGranted {// 收到投票
-		rf.voteCnt ++
+	} else {
 
-		// 判断成为leader
-		if rf.voteCnt * 2 > len(rf.peers) {
+		if reply.VoteGranted {// 收到投票
+			rf.voteCnt ++
 
-			// 变为leader 其余选票直接丢弃
-			rf.state = Leader
-			log.Printf("term %d, id %d, %s get majority votes\n", rf.currentTerm, rf.me, rf.state)
-
-			rf.mu.Unlock()
-			rf.getMajorityVotes <- true
-			rf.mu.Lock()
+			// 判断成为leader
+			if rf.voteCnt * 2 > len(rf.peers) {
+				rf.getMajorityVotes()
+			}
 		}
 	}
 
@@ -474,11 +537,11 @@ func (rf *Raft) Kill() {
 /*
 leader 的 心跳为周期 100ms，频率 10/s
 election timeout 选举超时得比这个大很多，600ms + rand(200ms)
-	否则：当A成为leader时，A的心跳包还没到Follower的B，B就成为Candidate了。
+    否则：当A成为leader时，A的心跳包还没到Follower的B，B就成为Candidate了。
  */
 
 // 在通信后，收到的Request term小；收到的Response term小； 都变为Follower
-func (rf *Raft)  findLargerTerm(term int){
+func (rf *Raft) findLargerTerm(term int){
 
 	// 更新 currentTerm votedFor
 	rf.currentTerm = term
@@ -486,7 +549,7 @@ func (rf *Raft)  findLargerTerm(term int){
 	rf.votedFor = -1
 	rf.state = Follower
 
-	log.Printf("term %d, id %d, %s find larger term\n", rf.currentTerm, rf.me, rf.state)
+	log.Printf("term %d, id %d, %s(Follower) end work, found larger term\n", rf.currentTerm, rf.me, rf.state)
 
 	rf.mu.Unlock()
 	rf.findLargerTermCh <- true
@@ -494,11 +557,50 @@ func (rf *Raft)  findLargerTerm(term int){
 
 }
 
+func (rf *Raft) receiveEntry(){
+	//rf.votedFor = args.LeaderId // 认为对方是leader
+	rf.state = Follower
+
+	log.Printf("term %d, id %d, %s(Follower) end work, received Entry\n", rf.currentTerm, rf.me, rf.state)
+
+	rf.mu.Unlock()
+	rf.receiveEntryCh <- true
+	rf.mu.Lock()
+}
+
+func (rf *Raft) grantVote(candidateId int){
+
+	rf.votedFor = candidateId
+	rf.state = Follower
+
+	// 同意投票
+	log.Printf("term %d, id %d, %s(Follower) end work, granted Vote\n", rf.currentTerm, rf.me, rf.state)
+
+	rf.mu.Unlock()
+	rf.grantVoteCh <- true // 决定投票 通知rf 变为 follower
+	rf.mu.Lock()
+}
+
+func (rf *Raft) getMajorityVotes(){
+
+	// 变为leader
+	rf.state = Leader
+
+	log.Printf("term %d, id %d, %s(Leader) end work, get majority votes\n", rf.currentTerm, rf.me, rf.state)
+
+	rf.mu.Unlock()
+	rf.receiveMajorityVotesCh <- true
+	rf.mu.Lock()
+}
+
+func electionTimeout() time.Duration {
+	return time.Duration(400 + rand.Intn(200)) * time.Millisecond
+	//return time.Duration(800 + rand.Intn(400)) * time.Millisecond
+}
+
+
 // 这3个函数，遵守论文中的rules for server
-
-
 func (rf *Raft) workAsFollower() {
-
 
 	// F只接受 request，故只在AppendEntries 与 RequestVote两个函数中接受channel
 	select {
@@ -508,13 +610,13 @@ func (rf *Raft) workAsFollower() {
 	case <- rf.findLargerTermCh:
 
 	// 接受 request 收到 AppendEntries合法通知，继续保持Follower
-	case <- rf.receiveEntriesCh:
+	case <- rf.receiveEntryCh:
 
 	// 接受 request 投出选票的合法通知，继续保持Follower
-	case <- rf.grantedVoteCh:
+	case <- rf.grantVoteCh:
 
 	// 否则 超时 变为Candidate
-	case <- time.After(time.Duration(800 + rand.Intn(400)) * time.Millisecond):
+	case <- time.After(electionTimeout()):
 		rf.mu.Lock()
 		rf.state = Candidate
 		log.Printf("term %d, id %d, %s(Candidate) end work, election timeout\n", rf.currentTerm, rf.me, rf.state)
@@ -551,8 +653,7 @@ func (rf *Raft) workAsCandidate() {
 			}
 
 			var reply  RequestVoteReply
-			// 用 goroutine 需要获得足够多的选票
-			// Candidate并行 寻求选票，（此goroutine 与 workAsCandidate 这个主程序要相互通信 ）
+			// Candidate goroutine 寻求选票，（此goroutine 与 workAsCandidate 这个主程序要相互通信 ）
 			go rf.sendRequestVote(i, &args, &reply)
 
 		}
@@ -569,17 +670,13 @@ func (rf *Raft) workAsCandidate() {
 	case <- rf.findLargerTermCh:
 
 	// 接受 request 收到 AppendEntries合法通知，继续变为Follower
-	case <- rf.receiveEntriesCh:
-
-	// 注意：我作为Candidate 我不会给其他人投票
-	// 接受 request 收到 投出选票的合法通知，继续变为Follower
-	// case <- rf.grantedVoteCh:
+	case <- rf.receiveEntryCh:
 
 	// 接受 Response 成为Leader
-	case <- rf.getMajorityVotes:
+	case <- rf.receiveMajorityVotesCh:
 
 	// 超时 保持Candidate 开始新的选举
-	case <- time.After(time.Duration(800 + rand.Intn(400)) * time.Millisecond):
+	case <- time.After(electionTimeout()):
 		log.Printf("term %d, id %d, %s(Candidate) end work, and will beigin the next election\n", rf.currentTerm, rf.me, rf.state)
 	}
 
@@ -616,14 +713,6 @@ func (rf *Raft) workAsLeader() {
 	// 接受 request 对方大
 	case <- rf.findLargerTermCh:
 
-	// 注意：我作为Leader 不会收到同Term的 AppendEntries
-	// 收到 AppendEntries合法通知，继续变为Follower
-	// case <- rf.receiveEntriesCh:
-
-	// 注意：我作为Leader 不会给同Term的 投票
-	// 收到 投出选票的合法通知，继续变为Follower
-	// case <- rf.grantedVoteCh:
-
 	// 这是一个循环，下一个循环 Leader再次发送AppendEntries 心跳 周期为100ms 频率10/s
 	case <- time.After(time.Duration(100) * time.Millisecond):
 		log.Printf("term %d, id %d, %s(Leader) end work, and will begin the next AppendEntries\n", rf.currentTerm, rf.me, rf.state)
@@ -647,7 +736,7 @@ func (rf *Raft) workAsLeader() {
 make 创建一个raft节点：
  */
 func Make(peers []*labrpc.ClientEnd, me int,
-	persister *Persister, applyCh chan ApplyMsg) *Raft {
+persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{} //生成一个rf节点
 	rf.peers = peers
 	rf.persister = persister
@@ -662,10 +751,11 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// 初始是 Follower
 	rf.state = Follower
 
-	rf.receiveEntriesCh = make(chan bool)
-	rf.grantedVoteCh = make(chan bool)
 	rf.findLargerTermCh = make(chan bool)
-	rf.getMajorityVotes = make(chan bool)
+	rf.receiveEntryCh = make(chan bool)
+	rf.grantVoteCh = make(chan bool)
+
+	rf.receiveMajorityVotesCh = make(chan bool)
 
 	log.Printf("begin work")
 	// rf 开始工作
@@ -737,9 +827,9 @@ rf.findLargerTerm(args.Term) 收到request 或 response的处理，变为Followe
 
 在一个go routine，不能同时发送两个channel
 所以：
-AppendEntries中：rf.findLargerTermCh 与 rf.receiveEntriesCh 互斥
-RequestVote中：rf.findLargerTermCh 与 rf.grantedVoteCh 互斥
-sendRequestVote中：rf.findLargerTermCh 与 rf.getMajorityVotes 互斥
+AppendEntries中：rf.findLargerTermCh 与 rf.receiveEntryCh 互斥
+RequestVote中：rf.findLargerTermCh 与 rf.grantVoteCh 互斥
+sendRequestVote中：rf.findLargerTermCh 与 rf.receiveMajorityVotesCh 互斥
  */
 
 /*
