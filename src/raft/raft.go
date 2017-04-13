@@ -715,7 +715,9 @@ func (rf *Raft) workAsLeader() {
 
 	// 这是一个循环，下一个循环 Leader再次发送AppendEntries 心跳 周期为100ms 频率10/s
 	case <- time.After(time.Duration(100) * time.Millisecond):
+		rf.mu.Lock()
 		log.Printf("term %d, id %d, %s(Leader) end work, and will begin the next AppendEntries\n", rf.currentTerm, rf.me, rf.state)
+		rf.mu.Unlock()
 	}
 }
 
