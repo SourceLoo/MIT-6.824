@@ -7,6 +7,6 @@ export "GOPATH=$path"
 for (( i = 1; i > 0; i++ )); do
     echo $i
     echo $i >> out.txt
-    `go test -run TestFailNoAgree2B -race >> out.txt 2>&1`
+    `go test -run TestRejoin2B -race >> out.txt 2>&1`
 done
 

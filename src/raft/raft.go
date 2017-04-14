@@ -238,7 +238,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if rf.getLastLogIndex() < args.PrevLogIndex{
 
 		// 简单处理 即减一
-		reply.NextIndex = args.PrevLogIndex
+		//reply.NextIndex = args.PrevLogIndex
 		return
 
 	} else {
@@ -260,26 +260,30 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 			log.Printf("term %d, id %d, %s +++++ append %d entries, log.index %d, log.term %d\n", rf.currentTerm, rf.me, rf.state, len(args.Entries), rf.getLastLogIndex(), rf.getLastLogTerm())
 
+
+
+			// 更新 本地commitIndex
+			if args.LeaderCommit > rf.commitIndex {
+
+				if args.LeaderCommit <= rf.getLastLogIndex(){
+					rf.commitIndex = args.LeaderCommit
+				} else {
+					rf.commitIndex = rf.getLastLogIndex()
+				}
+
+				rf.mu.Unlock()
+				log.Printf("term %d, id %d, %s(NotLeader) updateCommitIndex to %d\n", rf.currentTerm, rf.me, rf.state, rf.commitIndex)
+				rf.commitCh <- true
+				rf.mu.Lock()
+			}
+
 		} /*else {
 			//重点注意 删除 rf 之后的log 只保留到 preLogIndex之前
 			rf.log = rf.log[:args.PrevLogIndex]
 		}*/
 	}
 
-	// 更新 本地commitIndex
-	if args.LeaderCommit > rf.commitIndex {
 
-		if args.LeaderCommit <= rf.getLastLogIndex(){
-			rf.commitIndex = args.LeaderCommit
-		} else {
-			rf.commitIndex = rf.getLastLogIndex()
-		}
-
-		rf.mu.Unlock()
-		log.Printf("term %d, id %d, %s(NotLeader) updateCommitIndex to %d\n", rf.currentTerm, rf.me, rf.state, rf.commitIndex)
-		rf.commitCh <- true
-		rf.mu.Lock()
-	}
 
 
 	// 上面是 log replication 的操作
@@ -522,8 +526,9 @@ func (rf *Raft)  sendAppendEntries(server int, args *AppendEntriesArgs, reply *A
 
 		} else {	// 拒绝了
 			// 可能会慢点 但是直观
-			log.Printf("term %d, id %d, %s ---> entries term success. id %d, leaderCommit %d, prelogindex %d, prelogterm, %d, reply.NextIndex %d", rf.currentTerm, rf.me, rf.state, server, args.LeaderCommit, args.PrevLogIndex, args.PrevLogTerm, reply.NextIndex)
-			rf.nextIndex[server] = reply.NextIndex
+			log.Printf("term %d, id %d, %s ---> entries term failed. id %d, leaderCommit %d, prelogindex %d, prelogterm, %d, reply.NextIndex %d", rf.currentTerm, rf.me, rf.state, server, args.LeaderCommit, args.PrevLogIndex, args.PrevLogTerm, reply.NextIndex)
+			//rf.nextIndex[server] = reply.NextIndex
+			rf.nextIndex[server] --
 		}
 	}
 	return ok
