@@ -87,7 +87,7 @@ type Raft struct {
 	matchIndex []int
 
 
-	// 新增
+				      // 新增
 	state string // 状态
 	voteCnt int // 获得选票数
 
@@ -218,6 +218,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// 原子操作 要求rf处理完 这次AppendEntries request
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 
 	log.Printf("term %d, id %d, %s ---> entries term %d, id %d, %s\n", args.Term, args.LeaderId, Leader, rf.currentTerm, rf.me, rf.state)
 	log.Printf("len(args.entries) %d, args.PrevLogIndex %d, args.PrevLogTerm %d", len(args.Entries), args.PrevLogIndex, args.PrevLogTerm)
@@ -238,10 +239,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if rf.getLastLogIndex() < args.PrevLogIndex{
 
 		// 简单处理 即减一
-		//reply.NextIndex = args.PrevLogIndex
-		return
+		reply.NextIndex = rf.getLastLogIndex() + 1
+
 
 	} else {
+		reply.NextIndex = args.PrevLogIndex
 		// 本地log 不短于 leader
 
 
@@ -271,16 +273,28 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 					rf.commitIndex = rf.getLastLogIndex()
 				}
 
-				rf.mu.Unlock()
 				log.Printf("term %d, id %d, %s(NotLeader) updateCommitIndex to %d\n", rf.currentTerm, rf.me, rf.state, rf.commitIndex)
+				rf.mu.Unlock()
 				rf.commitCh <- true
 				rf.mu.Lock()
 			}
 
-		} /*else {
-			//重点注意 删除 rf 之后的log 只保留到 preLogIndex之前
-			rf.log = rf.log[:args.PrevLogIndex]
-		}*/
+		} else { // 在rf中 从后往前找到一个 log[i].term 不等于rf.log[args.PrevLogIndex].term的
+
+			for i := args.PrevLogIndex - 1; i >= 0; i-- {
+				if rf.log[i].Term != rf.log[args.PrevLogIndex].Term {
+					reply.NextIndex = i + 1
+					break
+				}
+			}
+
+		}
+
+
+		/*else {
+            //重点注意 删除 rf 之后的log 只保留到 preLogIndex之前
+            rf.log = rf.log[:args.PrevLogIndex]
+        }*/
 	}
 
 
@@ -326,7 +340,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	rf作为接受者，必须得通过channel来通知  这次通信结束后，改变状态。同时，得在此函数中，更新接受者的term
 
-		args作为发送者，在sendXXX时，获得reply值，在那个地方，改变通信结束状态 与 更新发送者term
+	    args作为发送者，在sendXXX时，获得reply值，在那个地方，改变通信结束状态 与 更新发送者term
 
 	A send to rf, rf receive MSG, rf reply;
 	*/
@@ -371,6 +385,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// 原子操作 要求rf处理完 这次 Vote request 操作
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 
 	log.Printf("term %d, id %d, %s ---> requestVote term %d, id %d, %s\n", args.Term, args.CandidateId, Candidate, rf.currentTerm, rf.me, rf.state)
 
@@ -412,23 +427,23 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
-	if grantVote && findLargerTerm { // 只通知一次
+	if grantVote && findLargerTerm { // 只通知一次 作为发现更大 term 投票 适用于 FCL
 
 
-		log.Printf("term %d, id %d, %s(Follower) end work, found larger term and granted vote\n", rf.currentTerm, rf.me, rf.state)
+		log.Printf("term %d, id %d, %s(FCL) end work, found larger term and granted vote\n", rf.currentTerm, rf.me, rf.state)
 
 		rf.mu.Unlock()
-		rf.grantVoteCh <- true
+		rf.findLargerTermCh <- true
 		rf.mu.Lock()
 
-	} else if grantVote {
+	} else if grantVote {// 只适用于Follower
 
 		log.Printf("term %d, id %d, %s(Follower) end work, granted vote\n", rf.currentTerm, rf.me, rf.state)
 		rf.mu.Unlock()
 		rf.grantVoteCh <- true
 		rf.mu.Lock()
 
-	} else if findLargerTerm {
+	} else if findLargerTerm { // 只适用于Follower
 
 		log.Printf("term %d, id %d, %s(Follower) end work, found larger term \n", rf.currentTerm, rf.me, rf.state)
 		rf.mu.Unlock()
@@ -442,46 +457,46 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	/*switch rf.state {
 	case Follower:
 
-		if args.Term > rf.currentTerm {
+	    if args.Term > rf.currentTerm {
 
-			// 对方大，变为Follower 与此同时 也投票，覆盖掉rf.grantVoteCh <- true
-			rf.findLargerTerm(args.Term)
+		// 对方大，变为Follower 与此同时 也投票，覆盖掉rf.grantVoteCh <- true
+		rf.findLargerTerm(args.Term)
 
-		} else {
-			if reply.VoteGranted {
-				rf.grantVote()
-			}
+	    } else {
+		if reply.VoteGranted {
+		    rf.grantVote()
 		}
+	    }
 
 	case Candidate:
-		if args.Term > rf.currentTerm {
+	    if args.Term > rf.currentTerm {
 
-			// 对方大，变为Follower 与此同时 也投票，覆盖掉rf.grantVoteCh <- true
-			reply.VoteGranted = true
-			rf.votedFor = args.CandidateId
+		// 对方大，变为Follower 与此同时 也投票，覆盖掉rf.grantVoteCh <- true
+		reply.VoteGranted = true
+		rf.votedFor = args.CandidateId
 
-			rf.findLargerTerm(args.Term)
+		rf.findLargerTerm(args.Term)
 
-		} else {
+	    } else {
 
-			// 两位Candidate Term相同，必然不投票(CandidateId 不满足)
-			reply.VoteGranted = false
-		}
+		// 两位Candidate Term相同，必然不投票(CandidateId 不满足)
+		reply.VoteGranted = false
+	    }
 
 	case Leader:
-		if args.Term > rf.currentTerm {
+	    if args.Term > rf.currentTerm {
 
-			// 对方大，变为Follower 与此同时 也投票，覆盖掉rf.grantVoteCh <- true
-			reply.VoteGranted = true
-			rf.votedFor = args.CandidateId
+		// 对方大，变为Follower 与此同时 也投票，覆盖掉rf.grantVoteCh <- true
+		reply.VoteGranted = true
+		rf.votedFor = args.CandidateId
 
-			rf.findLargerTerm(args.Term)
+		rf.findLargerTerm(args.Term)
 
-		} else {
+	    } else {
 
-			// Leader 不会把票给Term相同 的 Candidate (CandidateId 不满足)
-			reply.VoteGranted = false
-		}
+		// Leader 不会把票给Term相同 的 Candidate (CandidateId 不满足)
+		reply.VoteGranted = false
+	    }
 	}
 
 	// 本地没有投票 或 已经投过次candidate了  且 此candidate的log至少和本地一样新
@@ -504,6 +519,7 @@ func (rf *Raft)  sendAppendEntries(server int, args *AppendEntriesArgs, reply *A
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 
 	// 如果 不再是Leader 这里的回应没有意义了
 	if !ok || rf.state != Leader {
@@ -515,6 +531,10 @@ func (rf *Raft)  sendAppendEntries(server int, args *AppendEntriesArgs, reply *A
 		rf.findLargerTerm(reply.Term)
 
 	} else {
+		if reply.NextIndex <= 1 {
+			reply.NextIndex = 1
+		}
+
 		if reply.Success { // server 接受了全部的entries
 			log.Printf("term %d, id %d, %s ---> entries term success. id %d, leaderCommit %d, prelogindex %d, prelogterm, %d, reply.NextIndex %d", rf.currentTerm, rf.me, rf.state, server, args.LeaderCommit, args.PrevLogIndex, args.PrevLogTerm, reply.NextIndex)
 
@@ -524,11 +544,11 @@ func (rf *Raft)  sendAppendEntries(server int, args *AppendEntriesArgs, reply *A
 			rf.matchIndex[server] = reply.NextIndex - 1
 
 
-		} else {	// 拒绝了
+		} else {    // 拒绝了
 			// 可能会慢点 但是直观
 			log.Printf("term %d, id %d, %s ---> entries term failed. id %d, leaderCommit %d, prelogindex %d, prelogterm, %d, reply.NextIndex %d", rf.currentTerm, rf.me, rf.state, server, args.LeaderCommit, args.PrevLogIndex, args.PrevLogTerm, reply.NextIndex)
-			//rf.nextIndex[server] = reply.NextIndex
-			rf.nextIndex[server] --
+			rf.nextIndex[server] = reply.NextIndex
+			//rf.nextIndex[server] --
 		}
 	}
 	return ok
@@ -571,6 +591,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	// 原子操作 接受response 处理完
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 
 	// 如果 不再是Candidate 这里的选票没有意义了
 	if !ok || rf.state != Candidate {
@@ -631,6 +652,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	// Your code here (2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 
 	if rf.state != Leader {
 		isLeader = false
@@ -670,6 +692,8 @@ func (rf *Raft) findLargerTerm(term int){
 	rf.votedFor = -1
 
 	rf.state = Follower
+	//rf.persist()
+
 	log.Printf("term %d, id %d, %s(Follower) end work, found larger term\n", rf.currentTerm, rf.me, rf.state)
 
 	rf.mu.Unlock()
@@ -683,6 +707,7 @@ func (rf *Raft) findLargerTerm(term int){
 func (rf *Raft) receiveEntry(){
 	//rf.votedFor = args.LeaderId // 认为对方是leader
 	rf.state = Follower
+	//rf.persist()
 
 	log.Printf("term %d, id %d, %s(Follower) end work, received Entry\n", rf.currentTerm, rf.me, rf.state)
 
@@ -691,22 +716,24 @@ func (rf *Raft) receiveEntry(){
 	rf.mu.Lock()
 }
 
-func (rf *Raft) grantVote(){
+/*func (rf *Raft) grantVote(){
 
-	rf.state = Follower
+    rf.state = Follower
+    //rf.persist()
 
-	// 同意投票
-	log.Printf("term %d, id %d, %s(Follower) end work, granted Vote\n", rf.currentTerm, rf.me, rf.state)
+    // 同意投票
+    log.Printf("term %d, id %d, %s(Follower) end work, granted Vote\n", rf.currentTerm, rf.me, rf.state)
 
-	rf.mu.Unlock()
-	rf.grantVoteCh <- true // 决定投票 通知rf 变为 follower
-	rf.mu.Lock()
-}
+    rf.mu.Unlock()
+    rf.grantVoteCh <- true // 决定投票 通知rf 变为 follower
+    rf.mu.Lock()
+}*/
 
 func (rf *Raft) getMajorityVotes(){
 
 	// 变为leader
 	rf.state = Leader
+	//rf.persist()
 
 	log.Printf("term %d, id %d, %s(Leader) end work, get majority votes\n", rf.currentTerm, rf.me, rf.state)
 
@@ -741,6 +768,7 @@ func (rf *Raft) workAsFollower() {
 	case <- time.After(electionTimeout()):
 		rf.mu.Lock()
 		rf.state = Candidate
+		rf.persist()
 		log.Printf("term %d, id %d, %s(Candidate) end work, election timeout\n", rf.currentTerm, rf.me, rf.state)
 		rf.mu.Unlock()
 	}
@@ -750,6 +778,7 @@ func (rf *Raft) broadcastRequestVote() {
 	// 原子操作，要求 分发完所有 Request Vote
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 
 	if rf.state != Candidate {
 		return
@@ -962,6 +991,11 @@ persister *Persister, applyCh chan ApplyMsg) *Raft {
 	// Your initialization code here (2A, 2B, 2C).
 	rf.init()
 
+	// initialize from state persisted before a crash
+	rf.readPersist(persister.ReadRaftState())
+
+
+
 	log.Printf("begin work")
 
 	// rf 开始工作
@@ -1018,9 +1052,6 @@ persister *Persister, applyCh chan ApplyMsg) *Raft {
 		}
 	}()
 
-
-	// initialize from state persisted before a crash
-	rf.readPersist(persister.ReadRaftState())
 
 	return rf
 }

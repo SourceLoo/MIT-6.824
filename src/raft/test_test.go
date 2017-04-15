@@ -662,6 +662,8 @@ func TestFigure82C(t *testing.T) {
 
 	nup := servers
 	for iters := 0; iters < 1000; iters++ {
+
+		log.Printf("iters %d\n", iters)
 		leader := -1
 		for i := 0; i < servers; i++ {
 			if cfg.rafts[i] != nil {
@@ -681,6 +683,7 @@ func TestFigure82C(t *testing.T) {
 		}
 
 		if leader != -1 {
+			log.Printf("crash leader %d\n", leader)
 			cfg.crash1(leader)
 			nup -= 1
 		}
@@ -688,12 +691,14 @@ func TestFigure82C(t *testing.T) {
 		if nup < 3 {
 			s := rand.Int() % servers
 			if cfg.rafts[s] == nil {
+				log.Printf("start %d\n", s)
 				cfg.start1(s)
 				cfg.connect(s)
 				nup += 1
 			}
 		}
 	}
+	log.Printf("iters done, connect all\n")
 
 	for i := 0; i < servers; i++ {
 		if cfg.rafts[i] == nil {
