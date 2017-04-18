@@ -386,6 +386,8 @@ func (cfg *config) wait(index int, n int, startTerm int) interface{} {
 // same value, since nCommitted() checks this,
 // as do the threads that read from applyCh.
 // returns index.
+
+// 给所有server都添加一个cmd（位置不定），然后，要求当前leader在10s内将cmd（包括之前的） 全部apply到rsm中，否则不能pass。
 func (cfg *config) one(cmd int, expectedServers int) int {
 
 	log.Printf("one start")
@@ -405,7 +407,7 @@ func (cfg *config) one(cmd int, expectedServers int) int {
 			if rf != nil {
 				index1, term1, ok := rf.Start(cmd)
 				if ok {
-					log.Printf("leader %d log.index %d log.term %d\n", si, index1, term1)
+					log.Printf("leader %d log.index %d log.term %d\n", starts, index1, term1)
 					index = index1
 					break
 				}

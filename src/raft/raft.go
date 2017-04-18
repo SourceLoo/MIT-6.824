@@ -521,8 +521,8 @@ func (rf *Raft)  sendAppendEntries(server int, args *AppendEntriesArgs, reply *A
 	defer rf.mu.Unlock()
 	defer rf.persist()
 
-	// 如果 不再是Leader 这里的回应没有意义了
-	if !ok || rf.state != Leader {
+	// 如果 不再是发送Request时的Leader 这里的回应没有意义了
+	if !ok || rf.currentTerm != args.Term || rf.state != Leader{
 		return ok
 	}
 
@@ -593,8 +593,8 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	defer rf.mu.Unlock()
 	defer rf.persist()
 
-	// 如果 不再是Candidate 这里的选票没有意义了
-	if !ok || rf.state != Candidate {
+	// 如果 不再是发送Request的Candidate 这里的选票没有意义了
+	if !ok ||rf.currentTerm != args.Term || rf.state != Candidate {
 		return ok
 	}
 
@@ -1094,4 +1094,10 @@ sendRequestVote中：rf.findLargerTermCh 与 rf.receiveMajorityVotesCh 互斥
 1 是 旧Leade，给Leader0发 AppendEntries，收到response后，变为Follower，正准备进入下一回合state（需上锁）
 此时，0 给 1 发 entries，1响应，收到entries，rf.ReceivedEntriesCh <- true，阻塞。未解锁。
 总结：mu.lock unlock之间 尽量不要发生Channel操作
+ */
+
+/*
+2B错误场景再现：
+在RequestVote中，rf状态改变后，正准备通知rf.findLargerTerm时，超时了。。
+详见2B.old日志 106522行，如何避免？
  */
