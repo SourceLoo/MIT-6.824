@@ -331,42 +331,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	}
 
-
-	// 以下情况是leader 的term 不小于本地，
-
-
-	/*
-	注意 在此次交流中，
-
-	rf作为接受者，必须得通过channel来通知  这次通信结束后，改变状态。同时，得在此函数中，更新接受者的term
-
-	    args作为发送者，在sendXXX时，获得reply值，在那个地方，改变通信结束状态 与 更新发送者term
-
-	A send to rf, rf receive MSG, rf reply;
-	*/
-
-
-	/*
-
-	// 若本地log与leader 不一致 拒绝
-	if len(rf.log) - 1 < args.PrevLogIndex{
-	    reply.Success = false
-	    return
-
-	} else if rf.log[args.PrevLogIndex].Term != args.Term{
-	    reply.Success = false
-	    rf.log = rf.log[0:args.PrevLogIndex] // 删除args.PrevLogIndex与其之后所有entries
-	    return
-	}
-
-	// 若本地log与leader 一致，更新本地log
-	append(rf.log, args.Entries)
-
-	// 更新 本地commitIndex
-	if args.LeaderCommit > rf.commitIndex {
-	    rf.commitIndex = math.MinInt32(args.LeaderCommit, len(rf.log) - 1)
-	}*/
-
 }
 
 //
@@ -451,65 +415,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.mu.Lock()
 
 	}
-
-
-
-	/*switch rf.state {
-	case Follower:
-
-	    if args.Term > rf.currentTerm {
-
-		// 对方大，变为Follower 与此同时 也投票，覆盖掉rf.grantVoteCh <- true
-		rf.findLargerTerm(args.Term)
-
-	    } else {
-		if reply.VoteGranted {
-		    rf.grantVote()
-		}
-	    }
-
-	case Candidate:
-	    if args.Term > rf.currentTerm {
-
-		// 对方大，变为Follower 与此同时 也投票，覆盖掉rf.grantVoteCh <- true
-		reply.VoteGranted = true
-		rf.votedFor = args.CandidateId
-
-		rf.findLargerTerm(args.Term)
-
-	    } else {
-
-		// 两位Candidate Term相同，必然不投票(CandidateId 不满足)
-		reply.VoteGranted = false
-	    }
-
-	case Leader:
-	    if args.Term > rf.currentTerm {
-
-		// 对方大，变为Follower 与此同时 也投票，覆盖掉rf.grantVoteCh <- true
-		reply.VoteGranted = true
-		rf.votedFor = args.CandidateId
-
-		rf.findLargerTerm(args.Term)
-
-	    } else {
-
-		// Leader 不会把票给Term相同 的 Candidate (CandidateId 不满足)
-		reply.VoteGranted = false
-	    }
-	}
-
-	// 本地没有投票 或 已经投过次candidate了  且 此candidate的log至少和本地一样新
-	*//*
-	lastIndex := len(rf.log) - 1
-	if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) && ((args.LastLogTerm > rf.log[lastIndex].Term ) || (args.LastLogTerm == rf.log[lastIndex].Term && args.LastLogIndex >= lastIndex)) {
-
-	    // 决定投票
-	    reply.VoteGranted = true
-	    rf.votedFor = args.CandidateId
-	} else {
-	    reply.VoteGranted = false
-	}*/
 }
 
 
@@ -844,7 +749,7 @@ func (rf *Raft) workAsCandidate() {
 
 }
 
-func (rf *Raft) updateCommitIndex() {
+func (rf *Raft) updateCommitIndex() { // 论文figure2的最后一条规则
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -1100,4 +1005,8 @@ sendRequestVote中：rf.findLargerTermCh 与 rf.receiveMajorityVotesCh 互斥
 2B错误场景再现：
 在RequestVote中，rf状态改变后，正准备通知rf.findLargerTerm时，超时了。。
 详见2B.old日志 106522行，如何避免？
+ */
+
+/*
+RequestVote、AppendEntries、sendRequestVote、sendAppendEntries 之间是互斥的
  */

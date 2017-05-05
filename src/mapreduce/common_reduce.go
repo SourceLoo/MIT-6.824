@@ -79,7 +79,7 @@ func doReduce(
 		if curKv.Key != preKv.Key && preKv.Key != "" { // 总结上一行结果 准备下一行
 			enc.Encode(KeyValue{preKv.Key, reduceF(preKv.Key, vs)})
 
-			vs = vs[:0]
+			vs = vs[:0] // 总结之后 vs置空
 		}
 
 		preKv = curKv
