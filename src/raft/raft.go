@@ -220,8 +220,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	defer rf.mu.Unlock()
 	defer rf.persist()
 
-	log.Printf("term %d, id %d, %s ---> entries term %d, id %d, %s\n", args.Term, args.LeaderId, Leader, rf.currentTerm, rf.me, rf.state)
-	log.Printf("len(args.entries) %d, args.PrevLogIndex %d, args.PrevLogTerm %d", len(args.Entries), args.PrevLogIndex, args.PrevLogTerm)
+	DPrintf("term %d, id %d, %s ---> entries term %d, id %d, %s\n", args.Term, args.LeaderId, Leader, rf.currentTerm, rf.me, rf.state)
+	DPrintf("len(args.entries) %d, args.PrevLogIndex %d, args.PrevLogTerm %d", len(args.Entries), args.PrevLogIndex, args.PrevLogTerm)
 
 	// 交换 term
 	reply.Term = rf.currentTerm
@@ -260,7 +260,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			reply.NextIndex = rf.getLastLogIndex() + 1
 			reply.Success = true
 
-			log.Printf("term %d, id %d, %s +++++ append %d entries, log.index %d, log.term %d\n", rf.currentTerm, rf.me, rf.state, len(args.Entries), rf.getLastLogIndex(), rf.getLastLogTerm())
+			DPrintf("term %d, id %d, %s +++++ append %d entries, log.index %d, log.term %d\n", rf.currentTerm, rf.me, rf.state, len(args.Entries), rf.getLastLogIndex(), rf.getLastLogTerm())
 
 
 
@@ -273,7 +273,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 					rf.commitIndex = rf.getLastLogIndex()
 				}
 
-				log.Printf("term %d, id %d, %s(NotLeader) updateCommitIndex to %d\n", rf.currentTerm, rf.me, rf.state, rf.commitIndex)
+				DPrintf("term %d, id %d, %s(NotLeader) updateCommitIndex to %d\n", rf.currentTerm, rf.me, rf.state, rf.commitIndex)
 				rf.mu.Unlock()
 				rf.commitCh <- true
 				rf.mu.Lock()
@@ -351,7 +351,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	defer rf.mu.Unlock()
 	defer rf.persist()
 
-	log.Printf("term %d, id %d, %s ---> requestVote term %d, id %d, %s\n", args.Term, args.CandidateId, Candidate, rf.currentTerm, rf.me, rf.state)
+	DPrintf("term %d, id %d, %s ---> requestVote term %d, id %d, %s\n", args.Term, args.CandidateId, Candidate, rf.currentTerm, rf.me, rf.state)
 
 	// 交换 term
 	reply.Term = rf.currentTerm
@@ -360,7 +360,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// 对方小，拒绝
 	if args.Term < rf.currentTerm {
 
-		log.Printf("term %d, id %d, %s is refused requestvote by term %d, id %d, %s, for smaller term\n", args.Term, args.CandidateId, Candidate, rf.currentTerm, rf.me, rf.state)
+		DPrintf("term %d, id %d, %s is refused requestvote by term %d, id %d, %s, for smaller term\n", args.Term, args.CandidateId, Candidate, rf.currentTerm, rf.me, rf.state)
 		return
 	}
 
@@ -387,14 +387,14 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.state = Follower
 	} else {
 
-		log.Printf("term %d, id %d, %s is refused requestvote by term %d, id %d, %s, for less up-to-date\n", args.Term, args.CandidateId, Candidate, rf.currentTerm, rf.me, rf.state)
+		DPrintf("term %d, id %d, %s is refused requestvote by term %d, id %d, %s, for less up-to-date\n", args.Term, args.CandidateId, Candidate, rf.currentTerm, rf.me, rf.state)
 		return
 	}
 
 	if grantVote && findLargerTerm { // 只通知一次 作为发现更大 term 投票 适用于 FCL
 
 
-		log.Printf("term %d, id %d, %s(FCL) end work, found larger term and granted vote\n", rf.currentTerm, rf.me, rf.state)
+		DPrintf("term %d, id %d, %s(FCL) end work, found larger term and granted vote\n", rf.currentTerm, rf.me, rf.state)
 
 		rf.mu.Unlock()
 		rf.findLargerTermCh <- true
@@ -402,14 +402,14 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	} else if grantVote {// 只适用于Follower
 
-		log.Printf("term %d, id %d, %s(Follower) end work, granted vote\n", rf.currentTerm, rf.me, rf.state)
+		DPrintf("term %d, id %d, %s(Follower) end work, granted vote\n", rf.currentTerm, rf.me, rf.state)
 		rf.mu.Unlock()
 		rf.grantVoteCh <- true
 		rf.mu.Lock()
 
 	} else if findLargerTerm { // 只适用于Follower
 
-		log.Printf("term %d, id %d, %s(Follower) end work, found larger term \n", rf.currentTerm, rf.me, rf.state)
+		DPrintf("term %d, id %d, %s(Follower) end work, found larger term \n", rf.currentTerm, rf.me, rf.state)
 		rf.mu.Unlock()
 		rf.findLargerTermCh <- true
 		rf.mu.Lock()
@@ -441,7 +441,7 @@ func (rf *Raft)  sendAppendEntries(server int, args *AppendEntriesArgs, reply *A
 		}
 
 		if reply.Success { // server 接受了全部的entries
-			log.Printf("term %d, id %d, %s ---> entries term success. id %d, leaderCommit %d, prelogindex %d, prelogterm, %d, reply.NextIndex %d", rf.currentTerm, rf.me, rf.state, server, args.LeaderCommit, args.PrevLogIndex, args.PrevLogTerm, reply.NextIndex)
+			DPrintf("term %d, id %d, %s ---> entries term success. id %d, leaderCommit %d, prelogindex %d, prelogterm, %d, reply.NextIndex %d", rf.currentTerm, rf.me, rf.state, server, args.LeaderCommit, args.PrevLogIndex, args.PrevLogTerm, reply.NextIndex)
 
 
 			// 不能这样，场景：leader发送了AppendEntries，但是过了许久才收到response，这是leader log已经变化。
@@ -451,7 +451,7 @@ func (rf *Raft)  sendAppendEntries(server int, args *AppendEntriesArgs, reply *A
 
 		} else {    // 拒绝了
 			// 可能会慢点 但是直观
-			log.Printf("term %d, id %d, %s ---> entries term failed. id %d, leaderCommit %d, prelogindex %d, prelogterm, %d, reply.NextIndex %d", rf.currentTerm, rf.me, rf.state, server, args.LeaderCommit, args.PrevLogIndex, args.PrevLogTerm, reply.NextIndex)
+			DPrintf("term %d, id %d, %s ---> entries term failed. id %d, leaderCommit %d, prelogindex %d, prelogterm, %d, reply.NextIndex %d", rf.currentTerm, rf.me, rf.state, server, args.LeaderCommit, args.PrevLogIndex, args.PrevLogTerm, reply.NextIndex)
 			rf.nextIndex[server] = reply.NextIndex
 			//rf.nextIndex[server] --
 		}
@@ -568,7 +568,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	term = rf.currentTerm
 
 	rf.log = append(rf.log, Entry{Term:term, Cmd:command}) // 增加一条log
-	log.Printf("term %d, id %d, %s +++++ append one entry, log.index %d, log.term %d\n", rf.currentTerm, rf.me, rf.state, index, term)
+	DPrintf("term %d, id %d, %s +++++ append one entry, log.index %d, log.term %d\n", rf.currentTerm, rf.me, rf.state, index, term)
 
 	return index, term, isLeader
 }
@@ -599,7 +599,7 @@ func (rf *Raft) findLargerTerm(term int){
 	rf.state = Follower
 	//rf.persist()
 
-	log.Printf("term %d, id %d, %s(Follower) end work, found larger term\n", rf.currentTerm, rf.me, rf.state)
+	DPrintf("term %d, id %d, %s(Follower) end work, found larger term\n", rf.currentTerm, rf.me, rf.state)
 
 	rf.mu.Unlock()
 	rf.findLargerTermCh <- true
@@ -614,7 +614,7 @@ func (rf *Raft) receiveEntry(){
 	rf.state = Follower
 	//rf.persist()
 
-	log.Printf("term %d, id %d, %s(Follower) end work, received Entry\n", rf.currentTerm, rf.me, rf.state)
+	DPrintf("term %d, id %d, %s(Follower) end work, received Entry\n", rf.currentTerm, rf.me, rf.state)
 
 	rf.mu.Unlock()
 	rf.receiveEntryCh <- true
@@ -627,7 +627,7 @@ func (rf *Raft) receiveEntry(){
     //rf.persist()
 
     // 同意投票
-    log.Printf("term %d, id %d, %s(Follower) end work, granted Vote\n", rf.currentTerm, rf.me, rf.state)
+    DPrintf("term %d, id %d, %s(Follower) end work, granted Vote\n", rf.currentTerm, rf.me, rf.state)
 
     rf.mu.Unlock()
     rf.grantVoteCh <- true // 决定投票 通知rf 变为 follower
@@ -640,7 +640,7 @@ func (rf *Raft) getMajorityVotes(){
 	rf.state = Leader
 	//rf.persist()
 
-	log.Printf("term %d, id %d, %s(Leader) end work, get majority votes\n", rf.currentTerm, rf.me, rf.state)
+	DPrintf("term %d, id %d, %s(Leader) end work, get majority votes\n", rf.currentTerm, rf.me, rf.state)
 
 	rf.mu.Unlock()
 	rf.receiveMajorityVotesCh <- true
@@ -674,7 +674,7 @@ func (rf *Raft) workAsFollower() {
 		rf.mu.Lock()
 		rf.state = Candidate
 		rf.persist()
-		log.Printf("term %d, id %d, %s(Candidate) end work, election timeout\n", rf.currentTerm, rf.me, rf.state)
+		DPrintf("term %d, id %d, %s(Candidate) end work, election timeout\n", rf.currentTerm, rf.me, rf.state)
 		rf.mu.Unlock()
 	}
 }
@@ -706,7 +706,7 @@ func (rf *Raft) broadcastRequestVote() {
 	args.LastLogIndex = rf.getLastLogIndex()
 	args.LastLogTerm = rf.getLastLogTerm()
 
-	log.Printf("term %d, id %d, %s broadcast RequestVote\n", rf.currentTerm, rf.me, rf.state)
+	DPrintf("term %d, id %d, %s broadcast RequestVote\n", rf.currentTerm, rf.me, rf.state)
 
 	for i := 0; i < len(rf.peers); i++{
 
@@ -743,7 +743,7 @@ func (rf *Raft) workAsCandidate() {
 	// 超时 保持Candidate 开始新的选举
 	case <- time.After(electionTimeout()):
 		rf.mu.Lock()
-		log.Printf("term %d, id %d, %s(Candidate) end work, and will beigin the next election\n", rf.currentTerm, rf.me, rf.state)
+		DPrintf("term %d, id %d, %s(Candidate) end work, and will beigin the next election\n", rf.currentTerm, rf.me, rf.state)
 		rf.mu.Unlock()
 	}
 
@@ -765,7 +765,7 @@ func (rf *Raft) updateCommitIndex() { // 论文figure2的最后一条规则
 
 		cnt := 1
 		for i := 0; i < len(rf.peers); i++ {
-			log.Printf("i %d, matchIndex %d, N %d, log[N].term %d\n", i, rf.matchIndex[i], N, rf.log[N].Term)
+			DPrintf("i %d, matchIndex %d, N %d, log[N].term %d\n", i, rf.matchIndex[i], N, rf.log[N].Term)
 			if i != rf.me && rf.matchIndex[i] >= N && rf.log[N].Term == rf.currentTerm {
 				cnt ++
 			}
@@ -780,7 +780,7 @@ func (rf *Raft) updateCommitIndex() { // 论文figure2的最后一条规则
 		rf.commitIndex = N
 
 		rf.mu.Unlock()
-		log.Printf("term %d, id %d, %s(Leader) updateCommitIndex to %d\n", rf.currentTerm, rf.me, rf.state, rf.commitIndex)
+		DPrintf("term %d, id %d, %s(Leader) updateCommitIndex to %d\n", rf.currentTerm, rf.me, rf.state, rf.commitIndex)
 		rf.commitCh <- true
 		rf.mu.Lock()
 	}
@@ -796,7 +796,7 @@ func (rf *Raft) broadcastAppendEntries() {
 
 	// 原子操作，要求 分发完所有 AppendEntries
 
-	log.Printf("term %d, id %d, %s broadcast AppendEntries\n", rf.currentTerm, rf.me, rf.state)
+	DPrintf("term %d, id %d, %s broadcast AppendEntries\n", rf.currentTerm, rf.me, rf.state)
 	for i := 0; i < len(rf.peers); i++ {
 
 		if i == rf.me {
@@ -841,7 +841,7 @@ func (rf *Raft) workAsLeader() {
 	// 这是一个循环，下一个循环 Leader再次发送AppendEntries 心跳 周期为100ms 频率10/s
 	case <- time.After(time.Duration(100) * time.Millisecond):
 		rf.mu.Lock()
-		log.Printf("term %d, id %d, %s(Leader) end work, and will begin the next AppendEntries\n", rf.currentTerm, rf.me, rf.state)
+		DPrintf("term %d, id %d, %s(Leader) end work, and will begin the next AppendEntries\n", rf.currentTerm, rf.me, rf.state)
 		rf.mu.Unlock()
 	}
 }
@@ -901,7 +901,7 @@ persister *Persister, applyCh chan ApplyMsg) *Raft {
 
 
 
-	log.Printf("begin work")
+	DPrintf("begin work")
 
 	// rf 开始工作
 	go func() {
@@ -915,21 +915,21 @@ persister *Persister, applyCh chan ApplyMsg) *Raft {
 			// 注意 进入workAs方法，有可能state已经改变
 			case Follower:
 				rf.mu.Lock()
-				log.Printf("term %d, id %d, %s begin work\n", rf.currentTerm, rf.me, rf.state)
+				DPrintf("term %d, id %d, %s begin work\n", rf.currentTerm, rf.me, rf.state)
 				rf.mu.Unlock()
 
 				rf.workAsFollower()
 
 			case Candidate:
 				rf.mu.Lock()
-				log.Printf("term %d, id %d, %s begin work\n", rf.currentTerm, rf.me, rf.state)
+				DPrintf("term %d, id %d, %s begin work\n", rf.currentTerm, rf.me, rf.state)
 				rf.mu.Unlock()
 
 				rf.workAsCandidate()
 
 			case Leader:
 				rf.mu.Lock()
-				log.Printf("term %d, id %d, %s begin work\n", rf.currentTerm, rf.me, rf.state)
+				DPrintf("term %d, id %d, %s begin work\n", rf.currentTerm, rf.me, rf.state)
 				rf.mu.Unlock()
 
 				rf.workAsLeader()
@@ -948,7 +948,7 @@ persister *Persister, applyCh chan ApplyMsg) *Raft {
 			for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
 				msg := ApplyMsg{Index:i, Command:rf.log[i].Cmd}
 
-				log.Printf("term %d, id %d, %s ++++ apply log[%d] log.term %d\n", rf.currentTerm, rf.me, rf.state, i, rf.log[i].Term)
+				DPrintf("term %d, id %d, %s ++++ apply log[%d] log.term %d\n", rf.currentTerm, rf.me, rf.state, i, rf.log[i].Term)
 				applyCh <- msg
 
 			}

@@ -390,7 +390,7 @@ func (cfg *config) wait(index int, n int, startTerm int) interface{} {
 // 给所有server都添加一个cmd（位置不定），然后，要求当前leader在10s内将cmd（包括之前的） 全部apply到rsm中，否则不能pass。
 func (cfg *config) one(cmd int, expectedServers int) int {
 
-	log.Printf("one start")
+	DPrintf("one start")
 	t0 := time.Now()
 	starts := 0
 	for time.Since(t0).Seconds() < 10 {
@@ -407,7 +407,7 @@ func (cfg *config) one(cmd int, expectedServers int) int {
 			if rf != nil {
 				index1, term1, ok := rf.Start(cmd)
 				if ok {
-					log.Printf("leader %d log.index %d log.term %d\n", starts, index1, term1)
+					DPrintf("leader %d log.index %d log.term %d\n", starts, index1, term1)
 					index = index1
 					break
 				}
@@ -419,7 +419,7 @@ func (cfg *config) one(cmd int, expectedServers int) int {
 			t1 := time.Now()
 			for time.Since(t1).Seconds() < 2 {
 				nd, cmd1 := cfg.nCommitted(index)
-				log.Printf("one nd %d cmd1 %d cmd %d\n", nd, cmd1, cmd)
+				DPrintf("one nd %d cmd1 %d cmd %d\n", nd, cmd1, cmd)
 
 				if nd > 0 && nd >= expectedServers {
 					// committed

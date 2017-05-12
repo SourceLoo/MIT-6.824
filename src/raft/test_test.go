@@ -15,7 +15,7 @@ import "math/rand"
 import "sync/atomic"
 import (
 	"sync"
-	"log"
+	//"log"
 )
 
 // The tester generously allows solutions to complete elections in one second
@@ -150,11 +150,11 @@ func TestFailNoAgree2B(t *testing.T) {
 
 	// 3 of 5 followers disconnect
 	leader := cfg.checkOneLeader()
-	log.Printf("leader is %d\n", leader)
+	DPrintf("leader is %d\n", leader)
 	cfg.disconnect((leader + 1) % servers)
 	cfg.disconnect((leader + 2) % servers)
 	cfg.disconnect((leader + 3) % servers)
-	log.Printf("%d %d %d disconnect\n", (leader + 1) % servers, (leader + 2) % servers, (leader + 3) % servers)
+	DPrintf("%d %d %d disconnect\n", (leader + 1) % servers, (leader + 2) % servers, (leader + 3) % servers)
 
 	index, _, ok := cfg.rafts[leader].Start(20)
 	if ok != true {
@@ -175,7 +175,7 @@ func TestFailNoAgree2B(t *testing.T) {
 	cfg.connect((leader + 1) % servers)
 	cfg.connect((leader + 2) % servers)
 	cfg.connect((leader + 3) % servers)
-	log.Printf("%d %d %d connect\n", (leader + 1) % servers, (leader + 2) % servers, (leader + 3) % servers)
+	DPrintf("%d %d %d connect\n", (leader + 1) % servers, (leader + 2) % servers, (leader + 3) % servers)
 
 	// the disconnected majority may have chosen a leader from
 	// among their own ranks, forgetting index 2.
@@ -306,7 +306,7 @@ func TestRejoin2B(t *testing.T) {
 
 	// leader network failure
 	leader1 := cfg.checkOneLeader()
-	log.Printf("leader1 is %d, and disconnect\n", leader1)
+	DPrintf("leader1 is %d, and disconnect\n", leader1)
 	cfg.disconnect(leader1)
 
 	// make old leader try to agree on some entries
@@ -319,17 +319,17 @@ func TestRejoin2B(t *testing.T) {
 
 	// new leader network failure
 	leader2 := cfg.checkOneLeader()
-	log.Printf("leader2 is %d, and disconnect\n", leader2)
+	DPrintf("leader2 is %d, and disconnect\n", leader2)
 	cfg.disconnect(leader2)
 
 	// old leader connected again
-	log.Printf("older leader1 %d connect\n", leader1)
+	DPrintf("older leader1 %d connect\n", leader1)
 	cfg.connect(leader1)
 
 	cfg.one(104, 2)
 
 	// all together now
-	log.Printf("older leader2 %d connect\n", leader2)
+	DPrintf("older leader2 %d connect\n", leader2)
 	cfg.connect(leader2)
 
 	cfg.one(105, servers)
@@ -663,7 +663,7 @@ func TestFigure82C(t *testing.T) {
 	nup := servers
 	for iters := 0; iters < 1000; iters++ {
 
-		log.Printf("iters %d\n", iters)
+		DPrintf("iters %d\n", iters)
 		leader := -1
 		for i := 0; i < servers; i++ {
 			if cfg.rafts[i] != nil {
@@ -683,7 +683,7 @@ func TestFigure82C(t *testing.T) {
 		}
 
 		if leader != -1 {
-			log.Printf("crash leader %d\n", leader)
+			DPrintf("crash leader %d\n", leader)
 			cfg.crash1(leader)
 			nup -= 1
 		}
@@ -691,14 +691,14 @@ func TestFigure82C(t *testing.T) {
 		if nup < 3 {
 			s := rand.Int() % servers
 			if cfg.rafts[s] == nil {
-				log.Printf("start %d\n", s)
+				DPrintf("start %d\n", s)
 				cfg.start1(s)
 				cfg.connect(s)
 				nup += 1
 			}
 		}
 	}
-	log.Printf("iters done, connect all\n")
+	DPrintf("iters done, connect all\n")
 
 	for i := 0; i < servers; i++ {
 		if cfg.rafts[i] == nil {
