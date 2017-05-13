@@ -2,7 +2,7 @@ package raftkv
 
 const (
 	OK       = "OK"
-	ErrNoKey = "ErrNoKey"
+	Error = "Error"
 )
 
 type Err string
@@ -15,6 +15,11 @@ type PutAppendArgs struct {
 	// You'll have to add definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
+
+
+	// 这两个Id将用来完全区分一个entry
+	CkId int64 // client 的id
+	ReqId int  // 当前clinet的requestId
 }
 
 type PutAppendReply struct {
@@ -25,6 +30,11 @@ type PutAppendReply struct {
 type GetArgs struct {
 	Key string
 	// You'll have to add definitions here.
+
+	// 同上
+	// 这两个Id将用来完全区分一个entry
+	CkId int64 // client 的id
+	ReqId int  // 当前clinet的requestId
 }
 
 type GetReply struct {
