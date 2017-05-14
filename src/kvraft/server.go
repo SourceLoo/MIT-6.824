@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const Debug = 0
+const Debug = 1
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug > 0 {
@@ -64,9 +64,11 @@ func (kv *RaftKV) AppendEntryToLog(entry Op) (bool, string){
 
 	DPrintf("client -> server: Kind %s, key %s, value %s, ckid %d, reqid %d, kvid %d\n", entry.Kind, entry.Key, entry.Value, entry.CkId, entry.ReqId, entry.KvId)
 
-	kv.logResults[index] = make(chan string)
-
+	kv.mu.Lock()
+	kv.logResults[index] = make(chan string, 1) // 设置为1 允许异步
 	DPrintf("kv %d index %d\n", kv.me, index)
+	kv.mu.Unlock()
+
 	var result string
 	select {
 	case result = <- kv.logResults[index]:
@@ -185,8 +187,9 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 						result = OK
 					}
 				}
-
+				//DPrintf("00 ok %d, me %d, msg.Index %d\n",ok, me, msg.Index)
 				_, isLeader := kv.rf.GetState()
+				//DPrintf("11 ok %d, me %d, msg.Index %d\n",ok, me, msg.Index)
 
 				if isLeader && op.KvId == kv.me {
 					_, ok := kv.logResults[msg.Index]

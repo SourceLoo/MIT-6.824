@@ -950,7 +950,8 @@ persister *Persister, applyCh chan ApplyMsg) *Raft {
 
 				DPrintf("term %d, id %d, %s ++++ apply log[%d] log.term %d\n", rf.currentTerm, rf.me, rf.state, i, rf.log[i].Term)
 
-				// 注意这里解锁  所有channel通信都考虑解锁
+				// 注意这里解锁  通信都考虑解锁
+				// 因为不知道buffer有多大，所以建议还是解锁
 				rf.mu.Unlock()
 				applyCh <- msg
 				rf.mu.Lock()
