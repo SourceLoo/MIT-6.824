@@ -64,6 +64,7 @@ const (
 type Entry struct {
 	Cmd interface{}
 	Term int
+	Index int // 由于log compaction的存在，必须记录原始的index 注意，这是原始的index 不是下标
 }
 
 type Raft struct {
@@ -99,16 +100,18 @@ type Raft struct {
 
 	commitCh chan bool // commitIndex 有更新
 
+	applyCh chan ApplyMsg // lab3 kvserver与raft的通信
+
 }
 
 // 获取 本地最后一条日志的index
 func (rf *Raft) getLastLogIndex() (int) {
-	return len(rf.log) - 1
+	return rf.log[len(rf.log) - 1].Index
 }
 
 // 获取 本地最后一条日志的term
 func (rf *Raft) getLastLogTerm() (int) {
-	return rf.log[rf.getLastLogIndex()].Term
+	return rf.log[len(rf.log) - 1].Term
 }
 
 // return currentTerm and whether this server
@@ -153,15 +156,20 @@ func (rf *Raft) persist() {
 func (rf *Raft) readPersist(data []byte) {
 	// Your code here (2C).
 	// Example:
+	// 没有数据
+	if len(data) == 0 {
+		return
+	}
+
 	r := bytes.NewBuffer(data)
 	d := gob.NewDecoder(r)
 	d.Decode(&rf.currentTerm)
 	d.Decode(&rf.votedFor)
 	d.Decode(&rf.log)
 
-	if data == nil || len(data) < 1 { // bootstrap without any state?
+	/*if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
-	}
+	}*/
 }
 
 
@@ -248,12 +256,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 
 		// 匹配，先删除，再覆盖本地 args.PrevLogIndex 之后的entries
-		if rf.log[args.PrevLogIndex].Term == args.PrevLogTerm {
+
+		baseIndex := rf.log[0].Index
+		if rf.log[args.PrevLogIndex - baseIndex].Term == args.PrevLogTerm {
 
 			// leader nextIndex 为 leader.getLastLogIndex() + 1
 
 			//重点注意 删除 rf 之后的log 只保留到 preLogIndex
-			rf.log = rf.log[:args.PrevLogIndex + 1]
+			rf.log = rf.log[:args.PrevLogIndex - baseIndex + 1]
 			rf.log = append(rf.log, args.Entries...)
 
 			// 注意 先 覆盖，再确定
@@ -281,8 +291,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 		} else { // 在rf中 从后往前找到一个 log[i].term 不等于rf.log[args.PrevLogIndex].term的
 
-			for i := args.PrevLogIndex - 1; i >= 0; i-- {
-				if rf.log[i].Term != rf.log[args.PrevLogIndex].Term {
+			for i := args.PrevLogIndex - 1; i >= baseIndex; i-- {
+				if rf.log[i - baseIndex].Term != rf.log[args.PrevLogIndex - baseIndex].Term {
 					reply.NextIndex = i + 1
 					break
 				}
@@ -567,7 +577,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index = rf.getLastLogIndex() + 1 // 新来 命令应该存放的下标
 	term = rf.currentTerm
 
-	rf.log = append(rf.log, Entry{Term:term, Cmd:command}) // 增加一条log
+	rf.log = append(rf.log, Entry{Term:term, Cmd:command, Index:index}) // 增加一条log
 	DPrintf("term %d, id %d, %s +++++ append one entry, log.index %d, log.term %d\n", rf.currentTerm, rf.me, rf.state, index, term)
 
 	return index, term, isLeader
@@ -760,13 +770,14 @@ func (rf *Raft) updateCommitIndex() { // 论文figure2的最后一条规则
 
 	N := rf.commitIndex
 
+	baseIndex := rf.log[0].Index
 	// 从后往前
 	for N = rf.getLastLogIndex(); N > rf.commitIndex; N-- {
 
 		cnt := 1
 		for i := 0; i < len(rf.peers); i++ {
-			DPrintf("i %d, matchIndex %d, N %d, log[N].term %d\n", i, rf.matchIndex[i], N, rf.log[N].Term)
-			if i != rf.me && rf.matchIndex[i] >= N && rf.log[N].Term == rf.currentTerm {
+			DPrintf("i %d, matchIndex %d, N %d, log[N].term %d\n", i, rf.matchIndex[i], N, rf.log[N - baseIndex].Term)
+			if i != rf.me && rf.matchIndex[i] >= N && rf.log[N - baseIndex].Term == rf.currentTerm {
 				cnt ++
 			}
 		}
@@ -797,30 +808,48 @@ func (rf *Raft) broadcastAppendEntries() {
 	// 原子操作，要求 分发完所有 AppendEntries
 
 	DPrintf("term %d, id %d, %s broadcast AppendEntries\n", rf.currentTerm, rf.me, rf.state)
+	baseIndex := rf.log[0].Index
 	for i := 0; i < len(rf.peers); i++ {
 
 		if i == rf.me {
 			continue
 		}
 
-		// 构造 AppendEntriesArgs
-		var args AppendEntriesArgs
-		args.Term = rf.currentTerm
-		args.LeaderId = rf.me
+		// 两种情况
 
-		// 要复制的是 entries范围 [nextIndex:]
-		// 实际上 当 nextIndex[i] > rf.getLastLogIndex()时，nextIndex[i]是等于 rf.getLastLogIndex()+1 的，即entries = nil
-		args.PrevLogIndex = rf.nextIndex[i] - 1
-		args.PrevLogTerm = rf.log[args.PrevLogIndex].Term
+		if rf.nextIndex[i] > baseIndex{ // follower需要的log leader还有，发送AppendEntries
+			// 构造 AppendEntriesArgs
+			var args AppendEntriesArgs
+			args.Term = rf.currentTerm
+			args.LeaderId = rf.me
 
-		args.Entries = make([]Entry, rf.getLastLogIndex() - rf.nextIndex[i] + 1)
-		copy(args.Entries, rf.log[rf.nextIndex[i]: ]) // 不能直接相等，因为那是引用赋值，args.Entries 改变会影响rf改变
+			// 要复制的是 entries范围 [nextIndex:]
+			// 实际上 当 nextIndex[i] > rf.getLastLogIndex()时，nextIndex[i]是等于 rf.getLastLogIndex()+1 的，即entries = nil
+			args.PrevLogIndex = rf.nextIndex[i] - 1
+			args.PrevLogTerm = rf.log[args.PrevLogIndex - baseIndex].Term
 
-		args.LeaderCommit = rf.commitIndex
+			args.Entries = make([]Entry, rf.getLastLogIndex() - rf.nextIndex[i] + 1)
+			copy(args.Entries, rf.log[rf.nextIndex[i] - baseIndex: ]) // 不能直接相等，因为那是引用赋值，args.Entries 改变会影响rf改变
+
+			args.LeaderCommit = rf.commitIndex
 
 
-		var reply AppendEntriesReply
-		go rf.sendAppendEntries(i, &args, &reply)
+			var reply AppendEntriesReply
+			go rf.sendAppendEntries(i, &args, &reply)
+
+		} else { // follower需要的log 已经被leader丢弃，存入snapshot了，发送sendInstallSnapshot
+
+
+			var args InstallSnapshotArgs
+			args.Term = rf.currentTerm
+			args.LeaderId = rf.me
+			args.LastIncludedIndex = rf.log[0].Index
+			args.LastIncludedTerm = rf.log[0].Term
+			args.Data = rf.persister.snapshot // 注意 log[0]更新时，只有在snapshot的时候才会 所以这两者始终一致
+
+			var reply InstallSnapshotReply
+			go rf.sendInstallSnapshot(i, &args, &reply)
+		}
 
 	}
 
@@ -851,7 +880,7 @@ func (rf *Raft) init(){
 
 	rf.currentTerm = 0
 	rf.votedFor = -1
-	rf.log = append(rf.log, Entry{Term:0}) // 标志位 方便取得 lastLogTerm，已经 commit 与 apply 了
+	rf.log = append(rf.log, Entry{Term:0, Index:0}) // 标志位 方便取得 lastLogTerm，已经 commit 与 apply 了
 
 	rf.commitIndex = 0
 	rf.lastApplied = 0
@@ -893,11 +922,16 @@ persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf.persister = persister
 	rf.me = me
 
+
+	rf.applyCh = applyCh //lab3
+
 	// Your initialization code here (2A, 2B, 2C).
 	rf.init()
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
+
+	rf.readSnapshot(persister.ReadSnapshot()) //lab3 读取snapshot，恢复
 
 
 
@@ -945,19 +979,27 @@ persister *Persister, applyCh chan ApplyMsg) *Raft {
 			<- rf.commitCh
 			rf.mu.Lock()
 
-			for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
-				msg := ApplyMsg{Index:i, Command:rf.log[i].Cmd}
 
-				DPrintf("term %d, id %d, %s ++++ apply log[%d] log.term %d\n", rf.currentTerm, rf.me, rf.state, i, rf.log[i].Term)
+			baseIndex := rf.log[0].Index
+			DPrintf("baseIndex %d, rf.lastApplied %d, rf.commitIndex %d, len(log) %d\n", baseIndex, rf.lastApplied, rf.commitIndex, len(rf.log))
+			for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
+				baseIndex := rf.log[0].Index // rf通知 kvserver后，kvserver可能执行startSaveSnapshot，进而印象log
+				// 另外解决方法是此循环不解锁
+
+
+				DPrintf("i %d, baseIndex %d, len(log) %d\n", i, baseIndex, len(rf.log))
+				msg := ApplyMsg{Index:i, Command:rf.log[i - baseIndex].Cmd}
+
+				DPrintf("term %d, id %d, %s ++++ apply log[%d] log.term %d\n", rf.currentTerm, rf.me, rf.state, i, rf.log[i - baseIndex].Term)
 
 				// 注意这里解锁  通信都考虑解锁
 				// 因为不知道buffer有多大，所以建议还是解锁
 				rf.mu.Unlock()
-				applyCh <- msg
+				rf.applyCh <- msg
 				rf.mu.Lock()
 
+				rf.lastApplied = i // 放在内部更新
 			}
-			rf.lastApplied = rf.commitIndex
 			rf.mu.Unlock()
 		}
 	}()
@@ -971,6 +1013,146 @@ persister *Persister, applyCh chan ApplyMsg) *Raft {
 
 func (rf *Raft) GetPersistentSize() int {
 	return rf.persister.RaftStateSize()
+}
+
+//
+// 从snapshot中 恢复
+//
+func (rf *Raft) readSnapshot(snapshot []byte) {
+
+
+	//没有数据
+	if len(snapshot) == 0 {
+		return
+	}
+
+
+	r := bytes.NewBuffer(snapshot)
+	d := gob.NewDecoder(r)
+
+	var LastIncludedIndex int
+	var LastIncludedTerm int
+	// snapshot 里面的kv信息这里用不到
+
+	d.Decode(&LastIncludedIndex)
+	d.Decode(&LastIncludedTerm)
+
+	DPrintf("rf %d log[0].index %d, recoversp index [0:%d]", rf.me, rf.log[0].Index, LastIncludedIndex)
+
+	// 记录最后commitIndex与applied，其实这个位置不恢复也可以 因为log是幂等的。
+	rf.commitIndex = LastIncludedIndex
+	rf.lastApplied = LastIncludedIndex
+
+	// 接下来根据这个，调整log
+
+	// 首先构造新的baseIndex
+	var newlog []Entry
+	newlog = append(newlog, Entry{Term:LastIncludedTerm, Index:LastIncludedIndex}) // 已经commit的新的baseIndex
+	// 注意 可能lastIncludeIndex根本没有存在log中，但是这个baseIndex要先设定，此时commitIndex已经更新，无妨
+
+	// 然后是复制新baseIndex之后的所有
+	baseIndex := rf.log[0].Index
+	for i := rf.getLastLogIndex(); i >=  baseIndex; i-- {
+		if rf.log[i - baseIndex].Index == LastIncludedIndex && rf.log[i - baseIndex].Term == LastIncludedTerm {
+			// 找到了分割点
+			newlog = append(newlog, rf.log[i - baseIndex + 1:]...)
+			break
+		}
+
+	}
+
+	rf.log = newlog
+	// log改变 持久化
+	rf.persist()
+
+	// raft从snapshot恢复了新的数据，通知kvserver也恢复新的数据
+	msg := ApplyMsg{UseSnapshot:true, Snapshot:snapshot}
+	go func() {
+		rf.applyCh <- msg
+	}()
+}
+
+// 添加installSnapshot args结构
+type InstallSnapshotArgs struct {
+	Term              int
+	LeaderId          int
+	LastIncludedIndex int
+	LastIncludedTerm  int
+	Data              []byte
+}
+
+// 添加installSnapshot reply结构
+type InstallSnapshotReply struct {
+	Term int
+}
+
+// follower 接受InstallSnapshot RPC
+func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs,reply *InstallSnapshotReply) {
+
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	DPrintf("term %d, id %d, %s ---> InstallSnapshot term %d, id %d, %s\n", args.Term, args.LeaderId, Leader, rf.currentTerm, rf.me, rf.state)
+
+	// 交换 term
+	reply.Term = rf.currentTerm
+
+	// 对方小，拒绝
+	if args.Term < rf.currentTerm {
+
+		//leader 会变Follower，nextIndex 没必要更新
+		return
+	}
+
+	// 对方是leader
+
+	// 先存，再恢复，再持久化，顺序不能乱
+	rf.persister.SaveSnapshot(args.Data)
+	rf.readSnapshot(args.Data)
+}
+
+func (rf *Raft) sendInstallSnapshot(server int,args *InstallSnapshotArgs,reply *InstallSnapshotReply) {
+	ok := rf.peers[server].Call("Raft.InstallSnapshot", args, reply)
+
+	// 如果 不再是发送sendInstallSnapshot时的Leader 这里的回应没有意义了
+	if !ok || rf.currentTerm != args.Term || rf.state != Leader{
+		return
+	}
+
+	// 对法成功更新 不考虑 channel
+	if reply.Term <= rf.currentTerm {
+
+		rf.nextIndex[server] = args.LastIncludedIndex + 1
+		rf.matchIndex[server] = args.LastIncludedIndex
+	}
+}
+
+// kvservere 通知 raft 开始存snapshot
+func (rf *Raft) StartSnapshot(kvdata []byte, index int) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	baseIndex := rf.log[0].Index
+	DPrintf("rf %d will savesp at index %d, baseIndex %d, lastIndex %d\n", rf.me, index, baseIndex, rf.getLastLogIndex())
+	if index <= baseIndex || index > rf.getLastLogIndex() {
+		// in case having installed a snapshot from leader before snapshotting
+		// second condition is a hack
+		return
+	}
+
+	// 新log 在 [index:] 注意 log[index]作为新的baseIndex
+	rf.log = rf.log[index - baseIndex:]
+	rf.persist()
+
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	e.Encode(rf.log[0].Index)
+	e.Encode(rf.log[0].Term)
+
+	data := w.Bytes()
+	snapshot := append(data, kvdata...) // snapshot 结构清晰了
+	rf.persister.SaveSnapshot(snapshot)// 存入snapshot
+	DPrintf("rf %d savesp at index %d\n", rf.me, index)
 }
 
 /* 注意 读写raft成员的时候 都得加锁

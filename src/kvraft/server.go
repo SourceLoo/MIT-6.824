@@ -159,6 +159,11 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 				reader := bytes.NewBuffer(msg.Snapshot)
 				decoder := gob.NewDecoder(reader)
 
+				var LastIncludedIndex int
+				var LastIncludedTerm int
+				decoder.Decode(&LastIncludedIndex)
+				decoder.Decode(&LastIncludedTerm) // 注意 即使没有用，也要取出来
+
 				kv.mu.Lock()
 				decoder.Decode(&kv.db)
 				decoder.Decode(&kv.ack)
@@ -216,14 +221,17 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 				// saveSnapshot
 				if maxraftstate != -1 && kv.rf.GetPersistentSize() > maxraftstate {
 
+					DPrintf("%d, mekv startsp, msg.Index %d\n", me, msg.Index)
+
 					// 将kv 内容 写入data
 					writer := new(bytes.Buffer)
 					encoder := gob.NewEncoder(writer)
 					encoder.Encode(kv.db)
 					encoder.Encode(kv.ack)
-					data := writer.Bytes()
+					kvdata := writer.Bytes()
 
-					go kv.rf.StartSnapshot(data, msg.Index)
+					// 通知 rf去存储
+					go kv.rf.StartSnapshot(kvdata, msg.Index)
 
 				}
 				kv.mu.Unlock()
