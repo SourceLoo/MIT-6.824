@@ -967,6 +967,12 @@ persister *Persister, applyCh chan ApplyMsg) *Raft {
 }
 
 
+// for lab3 kvraft
+
+func (rf *Raft) GetPersistentSize() int {
+	return rf.persister.RaftStateSize()
+}
+
 /* 注意 读写raft成员的时候 都得加锁
 // 看日志
 

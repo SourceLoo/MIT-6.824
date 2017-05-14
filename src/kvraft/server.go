@@ -7,6 +7,7 @@ import (
 	"raft"
 	"sync"
 	"time"
+	"bytes"
 )
 
 const Debug = 1
@@ -150,8 +151,18 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 		for {
 			msg := <- kv.applyCh // 等待raft的applyCh
 
-			// 使用了snapshot
-			if msg.UseSnapshot {
+
+			if msg.UseSnapshot { // applyCh中有snapshot
+
+				// 将snapshot中的内容 赋值到 kv中
+
+				reader := bytes.NewBuffer(msg.Snapshot)
+				decoder := gob.NewDecoder(reader)
+
+				kv.mu.Lock()
+				decoder.Decode(&kv.db)
+				decoder.Decode(&kv.ack)
+				kv.mu.Unlock()
 
 			} else {
 
@@ -202,7 +213,19 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 					DPrintf("1 ok %d, me %d, msg.Index %d\n",ok, me, msg.Index)
 				}
 
+				// saveSnapshot
+				if maxraftstate != -1 && kv.rf.GetPersistentSize() > maxraftstate {
 
+					// 将kv 内容 写入data
+					writer := new(bytes.Buffer)
+					encoder := gob.NewEncoder(writer)
+					encoder.Encode(kv.db)
+					encoder.Encode(kv.ack)
+					data := writer.Bytes()
+
+					go kv.rf.StartSnapshot(data, msg.Index)
+
+				}
 				kv.mu.Unlock()
 			}
 
