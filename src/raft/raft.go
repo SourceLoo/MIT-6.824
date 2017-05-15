@@ -658,8 +658,8 @@ func (rf *Raft) getMajorityVotes(){
 }
 
 func electionTimeout() time.Duration {
-	return time.Duration(400 + rand.Intn(200)) * time.Millisecond
-	//return time.Duration(800 + rand.Intn(400)) * time.Millisecond
+	//return time.Duration(400 + rand.Intn(200)) * time.Millisecond
+	return time.Duration(800 + rand.Intn(400)) * time.Millisecond
 }
 
 
@@ -985,6 +985,9 @@ persister *Persister, applyCh chan ApplyMsg) *Raft {
 			for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
 				baseIndex := rf.log[0].Index // rf通知 kvserver后，kvserver可能执行startSaveSnapshot，进而印象log
 				// 另外解决方法是此循环不解锁
+				if i - baseIndex <=0 || i - baseIndex >= len(rf.log)  {
+					break
+				}
 
 
 				DPrintf("i %d, baseIndex %d, len(log) %d\n", i, baseIndex, len(rf.log))
