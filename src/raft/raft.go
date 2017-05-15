@@ -242,13 +242,13 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
+	// 本地log 长于 leader
+	if rf.log[0].Index > args.PrevLogIndex {
+		reply.NextIndex = rf.log[0].Index + 1
 
-	// 若本地log 短于 Leader
-	if rf.getLastLogIndex() < args.PrevLogIndex{
-
+	} else if rf.getLastLogIndex() < args.PrevLogIndex{// 若本地log 短于 Leader
 		// 简单处理 即减一
 		reply.NextIndex = rf.getLastLogIndex() + 1
-
 
 	} else {
 		reply.NextIndex = args.PrevLogIndex
