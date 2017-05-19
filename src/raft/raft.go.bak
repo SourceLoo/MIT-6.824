@@ -1117,7 +1117,6 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs,reply *InstallSnapshot
 	if args.Term < rf.currentTerm {
 
 		//leader 会变Follower，nextIndex 没必要更新
-		rf.mu.Unlock() // 注意所有分支都得解锁
 		return
 	}
 	if args.Term == rf.currentTerm && rf.state == Leader {
