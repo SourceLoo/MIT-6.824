@@ -6,6 +6,8 @@
 #name=TestSnapshotUnreliable
 name=Test
 
+export GOPATH=/Users/source/WorkSpace/myGit/mine/6.824
+
 go test -timeout 40m -run $name > log00 2>&1 &
 go test -timeout 40m -run $name > log01 2>&1 &
 go test -timeout 40m -run $name > log02 2>&1 &

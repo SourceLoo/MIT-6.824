@@ -983,7 +983,7 @@ persister *Persister, applyCh chan ApplyMsg) *Raft {
 			baseIndex := rf.log[0].Index
 			DPrintf("baseIndex %d, rf.lastApplied %d, rf.commitIndex %d, len(log) %d\n", baseIndex, rf.lastApplied, rf.commitIndex, len(rf.log))
 			for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
-				baseIndex := rf.log[0].Index // rf通知 kvserver后，kvserver可能执行startSaveSnapshot，进而印象log
+				baseIndex := rf.log[0].Index // rf通知 kvserver后，kvserver可能执行startSaveSnapshot，进而改变了log的长度
 				// 另外解决方法是此循环不解锁
 				if i - baseIndex <=0 || i - baseIndex >= len(rf.log)  {
 					break
@@ -1043,17 +1043,23 @@ func (rf *Raft) readSnapshot(snapshot []byte) {
 	DPrintf("rf %d log[0].index %d, recoversp index [0:%d]", rf.me, rf.log[0].Index, LastIncludedIndex)
 
 	// 记录最后commitIndex与applied，其实这个位置不恢复也可以 因为log是幂等的。
+
+	rf.mu.Lock()
+
 	rf.commitIndex = LastIncludedIndex
 	rf.lastApplied = LastIncludedIndex
 
 	// 接下来根据这个，调整log
 
 	// 首先构造新的baseIndex
+	// 新log 在 [LastIncludedIndex:] 注意 log[LastIncludedIndex]作为新的baseIndex
 	var newlog []Entry
 	newlog = append(newlog, Entry{Term:LastIncludedTerm, Index:LastIncludedIndex}) // 已经commit的新的baseIndex
 	// 注意 可能lastIncludeIndex根本没有存在log中，但是这个baseIndex要先设定，此时commitIndex已经更新，无妨
 
 	// 然后是复制新baseIndex之后的所有
+	// 可以简化lyq
+	// 先判断，再复制 rf.log[LastIncludedIndex - baseIndex + 1:]...
 	baseIndex := rf.log[0].Index
 	for i := rf.getLastLogIndex(); i >=  baseIndex; i-- {
 		if rf.log[i - baseIndex].Index == LastIncludedIndex && rf.log[i - baseIndex].Term == LastIncludedTerm {
@@ -1068,11 +1074,13 @@ func (rf *Raft) readSnapshot(snapshot []byte) {
 	// log改变 持久化
 	rf.persist()
 
+	rf.mu.Unlock() // 解锁
+
 	// raft从snapshot恢复了新的数据，通知kvserver也恢复新的数据
 	msg := ApplyMsg{UseSnapshot:true, Snapshot:snapshot}
-	go func() {
-		rf.applyCh <- msg
-	}()
+	//go func() {
+	rf.applyCh <- msg
+	//}()
 }
 
 // 添加installSnapshot args结构
@@ -1093,7 +1101,6 @@ type InstallSnapshotReply struct {
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs,reply *InstallSnapshotReply) {
 
 	rf.mu.Lock()
-	defer rf.mu.Unlock()
 
 	DPrintf("term %d, id %d, %s ---> InstallSnapshot term %d, id %d, %s\n", args.Term, args.LeaderId, Leader, rf.currentTerm, rf.me, rf.state)
 
@@ -1106,25 +1113,38 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs,reply *InstallSnapshot
 		//leader 会变Follower，nextIndex 没必要更新
 		return
 	}
-
-	// 对方是leader
+	if args.Term == rf.currentTerm && rf.state == Leader {
+		log.Fatalf("more than two leaders with the same term\n");
+	}
+	DPrintf("In receiveInstallSnapshot\n");
+	rf.findLargerTerm(args.Term) // 充当findLargerTerm与receiveEntries
+	rf.mu.Unlock()
 
 	// 先存，再恢复，再持久化，顺序不能乱
 	rf.persister.SaveSnapshot(args.Data)
-	rf.readSnapshot(args.Data)
+	rf.readSnapshot(args.Data) // 会通知
 }
 
+// 注意要和sendAppendEntries 完全一样对待
 func (rf *Raft) sendInstallSnapshot(server int,args *InstallSnapshotArgs,reply *InstallSnapshotReply) {
 	ok := rf.peers[server].Call("Raft.InstallSnapshot", args, reply)
+
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	defer rf.persist()
 
 	// 如果 不再是发送sendInstallSnapshot时的Leader 这里的回应没有意义了
 	if !ok || rf.currentTerm != args.Term || rf.state != Leader{
 		return
 	}
 
-	// 对法成功更新 不考虑 channel
-	if reply.Term <= rf.currentTerm {
+	if reply.Term > rf.currentTerm { // 对方 term大
+		// 对法成功更新 也要考虑 channel
 
+		DPrintf("In sendInstallSnapshot\n");
+		rf.findLargerTerm(reply.Term)
+		return
+	}else {
 		rf.nextIndex[server] = args.LastIncludedIndex + 1
 		rf.matchIndex[server] = args.LastIncludedIndex
 	}
