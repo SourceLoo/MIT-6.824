@@ -931,7 +931,7 @@ persister *Persister, applyCh chan ApplyMsg) *Raft {
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
-	rf.readSnapshot(persister.ReadSnapshot()) //lab3 读取snapshot，恢复
+	rf.readSnapshot(persister.ReadSnapshot(), true) //lab3 读取snapshot，恢复
 
 
 
@@ -1021,7 +1021,7 @@ func (rf *Raft) GetPersistentSize() int {
 //
 // 从snapshot中 恢复
 //
-func (rf *Raft) readSnapshot(snapshot []byte) {
+func (rf *Raft) readSnapshot(snapshot []byte, restart bool) {
 
 
 	//没有数据
@@ -1078,9 +1078,15 @@ func (rf *Raft) readSnapshot(snapshot []byte) {
 
 	// raft从snapshot恢复了新的数据，通知kvserver也恢复新的数据
 	msg := ApplyMsg{UseSnapshot:true, Snapshot:snapshot}
-	//go func() {
-	rf.applyCh <- msg
-	//}()
+
+	if restart { // 重启不必阻塞
+		go func() {
+		rf.applyCh <- msg
+		}()
+	} else { // installSnapshot 需要阻塞
+		rf.applyCh <- msg
+	}
+
 }
 
 // 添加installSnapshot args结构
@@ -1111,6 +1117,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs,reply *InstallSnapshot
 	if args.Term < rf.currentTerm {
 
 		//leader 会变Follower，nextIndex 没必要更新
+		rf.mu.Unlock() // 注意所有分支都得解锁
 		return
 	}
 	if args.Term == rf.currentTerm && rf.state == Leader {
@@ -1122,7 +1129,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs,reply *InstallSnapshot
 
 	// 先存，再恢复，再持久化，顺序不能乱
 	rf.persister.SaveSnapshot(args.Data)
-	rf.readSnapshot(args.Data) // 会通知
+	rf.readSnapshot(args.Data, false) // 会通知 不是restart的状态，必须同步阻塞
 }
 
 // 注意要和sendAppendEntries 完全一样对待
