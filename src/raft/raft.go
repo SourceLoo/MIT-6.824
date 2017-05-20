@@ -335,6 +335,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.findLargerTerm(args.Term)
 
 		} else { // 同一个Term 不可能出现两个Leader
+			DPrintf("1term %d, id %d, %s ---> entries term %d, id %d, %s\n", args.Term, args.LeaderId, Leader, rf.currentTerm, rf.me, rf.state)
 			log.Fatalf("more than two leaders with the same term")
 			//rf.receiveEntry()
 		}
@@ -1120,10 +1121,11 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs,reply *InstallSnapshot
 		rf.mu.Unlock() // 注意所有分支都得解锁
 		return
 	}
+	DPrintf("In receiveInstallSnapshot\n");
 	if args.Term == rf.currentTerm && rf.state == Leader {
+		DPrintf("term %d, id %d, %s ---> InstallSnapshot term %d, id %d, %s\n", args.Term, args.LeaderId, Leader, rf.currentTerm, rf.me, rf.state)
 		log.Fatalf("more than two leaders with the same term\n");
 	}
-	DPrintf("In receiveInstallSnapshot\n");
 	rf.findLargerTerm(args.Term) // 充当findLargerTerm与receiveEntries
 	rf.mu.Unlock()
 
