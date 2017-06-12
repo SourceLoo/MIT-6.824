@@ -39,6 +39,9 @@ type Err string
 
 type JoinArgs struct {
 	Servers map[int][]string // new GID -> servers mappings
+
+	CkId int64 // 客户端的id
+	ReqId int // 客户端的第ReqId次请求
 }
 
 type JoinReply struct {
@@ -48,6 +51,9 @@ type JoinReply struct {
 
 type LeaveArgs struct {
 	GIDs []int
+
+	CkId int64 // 客户端的id
+	ReqId int // 客户端的第ReqId次请求
 }
 
 type LeaveReply struct {
@@ -58,6 +64,9 @@ type LeaveReply struct {
 type MoveArgs struct {
 	Shard int
 	GID   int
+
+	CkId int64 // 客户端的id
+	ReqId int // 客户端的第ReqId次请求
 }
 
 type MoveReply struct {
@@ -67,6 +76,9 @@ type MoveReply struct {
 
 type QueryArgs struct {
 	Num int // desired config number
+
+	CkId int64 // 客户端的id
+	ReqId int // 客户端的第ReqId次请求
 }
 
 type QueryReply struct {

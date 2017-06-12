@@ -7,11 +7,18 @@ package shardmaster
 import "labrpc"
 import "time"
 import "crypto/rand"
-import "math/big"
+import (
+	"math/big"
+	"sync"
+)
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// Your data here.
+
+	id int64	// client的id
+	reqId int  	// 当前clinet的requestId
+	mu      sync.Mutex  //对当前client加锁 一个client可能并行发送多个RPC
 }
 
 func nrand() int64 {
@@ -25,6 +32,9 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
 	// Your code here.
+
+	ck.id = nrand() //随机生成 因为client会反复上线，不能从0开始增长
+	ck.reqId = 0;	//初始化为0
 	return ck
 }
 
@@ -32,6 +42,14 @@ func (ck *Clerk) Query(num int) Config {
 	args := &QueryArgs{}
 	// Your code here.
 	args.Num = num
+
+	// 构建QueryArgs
+	ck.mu.Lock()
+	args.CkId = ck.id
+	args.ReqId = ck.reqId
+	ck.reqId++
+	ck.mu.Unlock()
+
 	for {
 		// try each known server.
 		for _, srv := range ck.servers {
@@ -49,6 +67,13 @@ func (ck *Clerk) Join(servers map[int][]string) {
 	args := &JoinArgs{}
 	// Your code here.
 	args.Servers = servers
+
+	// 构建QueryArgs
+	ck.mu.Lock()
+	args.CkId = ck.id
+	args.ReqId = ck.reqId
+	ck.reqId++
+	ck.mu.Unlock()
 
 	for {
 		// try each known server.
@@ -68,6 +93,13 @@ func (ck *Clerk) Leave(gids []int) {
 	// Your code here.
 	args.GIDs = gids
 
+	// 构建QueryArgs
+	ck.mu.Lock()
+	args.CkId = ck.id
+	args.ReqId = ck.reqId
+	ck.reqId++
+	ck.mu.Unlock()
+
 	for {
 		// try each known server.
 		for _, srv := range ck.servers {
@@ -86,6 +118,13 @@ func (ck *Clerk) Move(shard int, gid int) {
 	// Your code here.
 	args.Shard = shard
 	args.GID = gid
+
+	// 构建QueryArgs
+	ck.mu.Lock()
+	args.CkId = ck.id
+	args.ReqId = ck.reqId
+	ck.reqId++
+	ck.mu.Unlock()
 
 	for {
 		// try each known server.
