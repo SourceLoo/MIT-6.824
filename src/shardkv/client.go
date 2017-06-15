@@ -12,13 +12,18 @@ import "labrpc"
 import "crypto/rand"
 import "math/big"
 import "shardmaster"
-import "time"
+import (
+	"time"
+	"sync"
+)
 
 //
 // which shard is a key in?
 // please use this function,
 // and please do not change it.
 //
+
+// 通过key 得到shard
 func key2shard(key string) int {
 	shard := 0
 	if len(key) > 0 {
@@ -40,6 +45,10 @@ type Clerk struct {
 	config   shardmaster.Config
 	make_end func(string) *labrpc.ClientEnd
 	// You will have to modify this struct.
+
+	id int64	// client的id
+	reqId int  	// 当前clinet的requestId
+	mu      sync.Mutex  //对当前client加锁 一个client可能并行发送多个RPC
 }
 
 //
@@ -56,6 +65,9 @@ func MakeClerk(masters []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 	ck.sm = shardmaster.MakeClerk(masters)
 	ck.make_end = make_end
 	// You'll have to add code here.
+
+	ck.id = nrand() //随机生成 因为client会反复上线，不能从0开始增长
+	ck.reqId = 0;	//初始化为0
 	return ck
 }
 
@@ -66,8 +78,13 @@ func MakeClerk(masters []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 // You will have to modify this function.
 //
 func (ck *Clerk) Get(key string) string {
-	args := GetArgs{}
-	args.Key = key
+	ck.mu.Lock()
+	defer ck.mu.Unlock()
+
+	// 构建args
+	args := &GetArgs{Key:key, CkId:ck.id}
+	ck.reqId++
+	args.ReqId = ck.reqId // 先赋值  or  先 自增一样
 
 	for {
 		shard := key2shard(key)
@@ -77,7 +94,7 @@ func (ck *Clerk) Get(key string) string {
 			for si := 0; si < len(servers); si++ {
 				srv := ck.make_end(servers[si])
 				var reply GetReply
-				ok := srv.Call("ShardKV.Get", &args, &reply)
+				ok := srv.Call("ShardKV.Get", args, &reply)
 				if ok && reply.WrongLeader == false && (reply.Err == OK || reply.Err == ErrNoKey) {
 					return reply.Value
 				}
@@ -99,11 +116,13 @@ func (ck *Clerk) Get(key string) string {
 // You will have to modify this function.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	args := PutAppendArgs{}
-	args.Key = key
-	args.Value = value
-	args.Op = op
+	ck.mu.Lock()
+	defer ck.mu.Unlock()
 
+	// 构建args
+	args := &PutAppendArgs{Key:key, Value:value, Op:op, CkId: ck.id}
+	ck.reqId++
+	args.ReqId = ck.reqId // 先赋值  or  先 自增一样
 
 	for {
 		shard := key2shard(key)
@@ -112,7 +131,7 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 			for si := 0; si < len(servers); si++ {
 				srv := ck.make_end(servers[si])
 				var reply PutAppendReply
-				ok := srv.Call("ShardKV.PutAppend", &args, &reply)
+				ok := srv.Call("ShardKV.PutAppend", args, &reply)
 				if ok && reply.WrongLeader == false && reply.Err == OK {
 					return
 				}
