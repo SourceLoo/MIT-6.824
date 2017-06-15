@@ -41,7 +41,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 func (ck *Clerk) Query(num int) Config {
 	args := &QueryArgs{}
 	// Your code here.
-	args.Num = num
+	args.Num = num // configuration num
 
 	// 构建QueryArgs
 	ck.mu.Lock()
@@ -63,6 +63,7 @@ func (ck *Clerk) Query(num int) Config {
 	}
 }
 
+// 将这些 replica group加入
 func (ck *Clerk) Join(servers map[int][]string) {
 	args := &JoinArgs{}
 	// Your code here.
@@ -88,6 +89,7 @@ func (ck *Clerk) Join(servers map[int][]string) {
 	}
 }
 
+// 将这些 replica group 删除
 func (ck *Clerk) Leave(gids []int) {
 	args := &LeaveArgs{}
 	// Your code here.
@@ -113,6 +115,7 @@ func (ck *Clerk) Leave(gids []int) {
 	}
 }
 
+// 当前shard id 分配给 当前gid
 func (ck *Clerk) Move(shard int, gid int) {
 	args := &MoveArgs{}
 	// Your code here.

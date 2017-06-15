@@ -229,11 +229,12 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 func (sm *ShardMaster) excute(op Op) {
 
 	switch op.Kind {
+	// 除了 query外，其余的3种操作都要新建config
 	case "Join":
 		config := sm.newConfig()
 		for gid, servers := range op.Servers {
 			_, ok := config.Groups[gid]
-			if !ok {
+			if !ok {// 当前 gid在 没有加入过，则新增加
 				config.Groups[gid] = servers
 				sm.rebalanceJoin(gid)
 			}
@@ -242,7 +243,7 @@ func (sm *ShardMaster) excute(op Op) {
 		config := sm.newConfig()
 		for _, gid := range op.GIDs {
 			_, ok := config.Groups[gid]
-			if ok {
+			if ok { // 当前 gid 存在，则删除
 				delete(config.Groups, gid)
 				sm.rebalanceLeave(gid)
 			}
@@ -250,6 +251,7 @@ func (sm *ShardMaster) excute(op Op) {
 	case "Move":
 		config := sm.newConfig()
 		if op.GIDs != nil && len(op.GIDs) > 0 {
+			// 取出op中的第0号 gid，分配给对应的shard id
 			config.Shards[op.Shard] = op.GIDs[0]
 		}
 	case "Query":
@@ -258,6 +260,7 @@ func (sm *ShardMaster) excute(op Op) {
 	sm.ack[op.CkId] = op.ReqId
 }
 
+// 创建新的config，这些config形成list
 func (sm *ShardMaster) newConfig() *Config {
 	old := &sm.configs[sm.configNum]
 	new := Config{}
@@ -271,11 +274,12 @@ func (sm *ShardMaster) newConfig() *Config {
 		new.Shards[i] = gid
 	}
 	sm.configNum++
-	sm.configs = append(sm.configs, new)
+	sm.configs = append(sm.configs, new) // 将新建的config加入原有的列表，注意是reference传递
 	return &sm.configs[sm.configNum]
 }
 
 
+// 我们有多个gids，每个gid对应若干个shard，我们要找到拥有最多shard数的gid
 func (sm *ShardMaster) getMaxShardCountGID() int {
 	config := &sm.configs[sm.configNum]
 
@@ -307,6 +311,7 @@ func (sm *ShardMaster) getMaxShardCountGID() int {
 	return result
 }
 
+// 我们有多个gids，每个gid对应若干个shard，我们要找到拥有最少shard数的gid
 func (sm *ShardMaster) getMinShardCountGID() int {
 	config := &sm.configs[sm.configNum]
 
@@ -332,6 +337,7 @@ func (sm *ShardMaster) getMinShardCountGID() int {
 	return result
 }
 
+// 通过gid，获得其拥有的其中一个shard
 func (sm *ShardMaster) getOneShardByGID(gid int) int {
 	config := &sm.configs[sm.configNum]
 
@@ -349,11 +355,15 @@ func (sm *ShardMaster) rebalanceJoin(gid int) {
 	i := 0
 
 	for {
+		// 当前有x个shard，y个gid，则最多需要转移x/y轮 妙
 		if i == NShards/len(config.Groups) {
+			// 如果gid数目多余shard数目，新来的gid不要拥有shard
 			break
 		}
 		max := sm.getMaxShardCountGID()
 		shard := sm.getOneShardByGID(max)
+
+		// 新来的gid的需要拥有一个shard，所以将max拥有的shard分配给新来的gid，减轻max的负载
 		config.Shards[shard] = gid
 		i++
 	}
@@ -368,6 +378,7 @@ func (sm *ShardMaster) rebalanceLeave(gid int) {
 		if shard == -1 {
 			break
 		}
+		// 当前gid要走，则需要将他拥有的所有shard转移，转移给min
 		config.Shards[shard] = min
 	}
 }
